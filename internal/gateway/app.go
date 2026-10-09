@@ -26,6 +26,11 @@ type routeRuntime struct {
 	targets []*url.URL
 	next    atomic.Uint64
 	waf     coraza.WAF
+	mode    string
+	paranoia int
+	threshold int
+	maxBodyBytes int64
+	rateLimit int
 }
 type snapshot struct {
 	config Config
@@ -124,26 +129,44 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 		if !r.Enabled {
 			continue
 		}
-		rt := &routeRuntime{config: r}
+		mode := c.Mode
+		if r.WAFMode != "" && r.WAFMode != "inherit" {
+			mode = r.WAFMode
+		}
+		paranoia, threshold := c.Paranoia, c.Threshold
+		if r.Paranoia != 0 {
+			paranoia = r.Paranoia
+		}
+		if r.AnomalyThreshold != 0 {
+			threshold = r.AnomalyThreshold
+		}
+		maxBodyBytes, rateLimit := c.MaxBodyBytes, c.RateLimit
+		if r.MaxBodyBytes != 0 {
+			maxBodyBytes = r.MaxBodyBytes
+		}
+		if r.RateLimit != 0 {
+			rateLimit = r.RateLimit
+		}
+		rt := &routeRuntime{config: r, mode: mode, paranoia: paranoia, threshold: threshold, maxBodyBytes: maxBodyBytes, rateLimit: rateLimit}
 		for _, raw := range r.Upstreams {
 			u, _ := url.Parse(raw)
 			rt.targets = append(rt.targets, u)
 		}
-		exclusions := ""
+		exclusions := fmt.Sprintf("%s|%d|%d|%d", mode, paranoia, threshold, maxBodyBytes)
 		for _, id := range r.ExcludedRuleIDs {
 			exclusions += fmt.Sprintf("SecRuleRemoveById %d\n", id)
 		}
 		waf, ok := engines[exclusions]
 		if !ok {
 			engine := "On"
-			if c.Mode == "detection" {
+			if mode == "detection" {
 				engine = "DetectionOnly"
 			}
 			response := "Off"
 			if c.ResponseInspection {
 				response = "On"
 			}
-			setup := fmt.Sprintf("SecRuleEngine %s\nSecRequestBodyAccess On\nSecRequestBodyLimit %d\nSecRequestBodyNoFilesLimit %d\nSecRequestBodyInMemoryLimit %d\nSecRequestBodyLimitAction Reject\nSecResponseBodyAccess %s\nSecResponseBodyLimit 1048576\nSecResponseBodyLimitAction Reject\nSecAuditEngine Off\nSecAction \"id:900000,phase:1,pass,nolog,setvar:tx.blocking_paranoia_level=%d,setvar:tx.detection_paranoia_level=%d,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=4\"\n", engine, c.MaxBodyBytes, c.MaxBodyBytes, c.MaxBodyBytes, response, c.Paranoia, c.Paranoia, c.Threshold)
+			setup := fmt.Sprintf("SecRuleEngine %s\nSecRequestBodyAccess On\nSecRequestBodyLimit %d\nSecRequestBodyNoFilesLimit %d\nSecRequestBodyInMemoryLimit %d\nSecRequestBodyLimitAction Reject\nSecResponseBodyAccess %s\nSecResponseBodyLimit 1048576\nSecResponseBodyLimitAction Reject\nSecAuditEngine Off\nSecAction \"id:900000,phase:1,pass,nolog,setvar:tx.blocking_paranoia_level=%d,setvar:tx.detection_paranoia_level=%d,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=4\"\n", engine, maxBodyBytes, maxBodyBytes, maxBodyBytes, response, paranoia, paranoia, threshold)
 			var err error
 			waf, err = coraza.NewWAF(coraza.NewWAFConfig().WithRootFS(crs.FS).WithDirectivesFromFile("@coraza.conf-recommended").WithDirectivesFromFile("@crs-setup.conf.example").WithDirectives(setup).WithDirectivesFromFile("@owasp_crs/*.conf").WithDirectives(exclusions))
 			if err != nil {
