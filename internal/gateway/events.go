@@ -137,6 +137,9 @@ func (e *EventStore) stats() map[string]any {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	series := make([]Bucket, 60)
+	routeCounts := map[string]uint64{}
+	statusCounts := map[string]uint64{}
+	clientCounts := map[string]uint64{}
 	now := time.Now().Unix() / 60
 	for i := range series {
 		m := now - 59 + int64(i)
@@ -146,7 +149,12 @@ func (e *EventStore) stats() map[string]any {
 		}
 		series[i] = b
 	}
-	return map[string]any{"requests": e.total, "blocked": e.blocked, "detected": e.detected, "errors": e.failed, "series": series, "auditError": e.logError}
+	for _, event := range e.events {
+		routeCounts[event.Route]++
+		statusCounts[fmt.Sprintf("%dxx", event.Status/100)]++
+		clientCounts[event.Client]++
+	}
+	return map[string]any{"requests": e.total, "blocked": e.blocked, "detected": e.detected, "errors": e.failed, "series": series, "routeCounts": routeCounts, "statusCounts": statusCounts, "clientCounts": clientCounts, "auditError": e.logError}
 }
 func (e *EventStore) metrics() string {
 	e.mu.Lock()
