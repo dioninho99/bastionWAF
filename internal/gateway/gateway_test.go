@@ -222,6 +222,24 @@ func TestRoutingAndRoundRobin(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 }
+func TestUnhealthyUpstreamIsSkippedOnNextRequest(t *testing.T) {
+	a, _, _ := testApp(t)
+	failing := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer failing.Close()
+	healthy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "healthy")
+	}))
+	defer healthy.Close()
+	change(t, a, func(c *Config) { c.Routes[0].Upstreams = []string{failing.URL, healthy.URL} })
+	if w := request(a, "GET", "/", "", ""); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("first response: %d", w.Code)
+	}
+	if w := request(a, "GET", "/", "", ""); w.Body.String() != "healthy" {
+		t.Fatalf("failover response: %q", w.Body.String())
+	}
+}
 func TestRouteSecurityPolicies(t *testing.T) {
 	a, _, hits := testApp(t)
 	change(t, a, func(c *Config) {
