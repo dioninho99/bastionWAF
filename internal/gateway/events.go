@@ -93,7 +93,7 @@ func (e *EventStore) add(v Event) {
 	data, _ := json.Marshal(v)
 	data = append(data, '\n')
 	if err := e.append(data); err != nil {
-		e.logError = "Audit-Log nicht beschreibbar"
+		e.logError = "audit log is not writable"
 		slog.Error("audit write failed", "error", err)
 	} else {
 		e.logError = ""

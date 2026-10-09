@@ -32,10 +32,10 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if e := d.Decode(v); e != nil {
-		return errors.New("Ungültige oder zu große JSON-Anfrage")
+		return errors.New("invalid or oversized JSON request")
 	}
 	if e := d.Decode(new(any)); e != io.EOF {
-		return errors.New("Nur ein JSON-Objekt erlaubt")
+		return errors.New("only one JSON object is allowed")
 	}
 	return nil
 }
@@ -59,7 +59,7 @@ func (a *App) AdminHandler(assets http.Handler) http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonReply(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
 		if !a.loginLimit.allow(clientIP(r), 10) {
-			apiError(w, 429, "Zu viele Anmeldeversuche. In einer Minute erneut versuchen.")
+			apiError(w, 429, "too many login attempts; try again in one minute")
 			return
 		}
 		var body struct {
@@ -71,7 +71,7 @@ func (a *App) AdminHandler(assets http.Handler) http.Handler {
 		}
 		hash := sha256.Sum256([]byte(body.Password))
 		if subtle.ConstantTimeCompare(hash[:], a.password[:]) != 1 {
-			apiError(w, 401, "Passwort falsch")
+			apiError(w, 401, "incorrect password")
 			return
 		}
 		token := randomID()
@@ -84,7 +84,7 @@ func (a *App) AdminHandler(assets http.Handler) http.Handler {
 		}
 		if len(a.sessions) >= 100 {
 			a.authMu.Unlock()
-			apiError(w, 429, "Zu viele aktive Sitzungen")
+			apiError(w, 429, "too many active sessions")
 			return
 		}
 		a.sessions[sha256.Sum256([]byte(token))] = s
@@ -96,11 +96,11 @@ func (a *App) AdminHandler(assets http.Handler) http.Handler {
 		return func(w http.ResponseWriter, r *http.Request) {
 			s, ok := a.getSession(r)
 			if !ok {
-				apiError(w, 401, "Bitte anmelden")
+				apiError(w, 401, "please sign in")
 				return
 			}
 			if r.Method != "GET" && r.Method != "HEAD" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(s.CSRF)) != 1 {
-				apiError(w, 403, "CSRF-Token fehlt oder ist ungültig")
+				apiError(w, 403, "CSRF token is missing or invalid")
 				return
 			}
 			fn(w, r)
@@ -126,7 +126,7 @@ func (a *App) AdminHandler(assets http.Handler) http.Handler {
 	mux.HandleFunc("PUT /api/config", protected(func(w http.ResponseWriter, r *http.Request) {
 		rev, e := strconv.ParseInt(strings.Trim(r.Header.Get("If-Match"), `"`), 10, 64)
 		if e != nil {
-			apiError(w, 428, "If-Match mit aktueller Revision erforderlich")
+			apiError(w, 428, "If-Match with the current revision is required")
 			return
 		}
 		var c Config
@@ -177,13 +177,13 @@ func (a *App) AdminHandler(assets http.Handler) http.Handler {
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		hash := sha256.Sum256([]byte(token))
 		if !sessionOK && subtle.ConstantTimeCompare(hash[:], a.password[:]) != 1 {
-			apiError(w, 401, "Authentifizierung erforderlich")
+			apiError(w, 401, "authentication required")
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		io.WriteString(w, a.Events.metrics())
 	})
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { apiError(w, 404, "API-Endpunkt nicht gefunden") })
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { apiError(w, 404, "API endpoint not found") })
 	mux.Handle("/", assets)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -193,7 +193,7 @@ func (a *App) AdminHandler(assets http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		if r.Method != "GET" && r.Method != "HEAD" {
 			if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
-				apiError(w, 403, "Cross-Site-Anfrage abgewiesen")
+				apiError(w, 403, "cross-site request rejected")
 				return
 			}
 			if origin := r.Header.Get("Origin"); origin != "" {
@@ -203,7 +203,7 @@ func (a *App) AdminHandler(assets http.Handler) http.Handler {
 					scheme = "https"
 				}
 				if e != nil || u.Host != r.Host || u.Scheme != scheme {
-					apiError(w, 403, "Origin nicht erlaubt")
+					apiError(w, 403, "origin not allowed")
 					return
 				}
 			}
