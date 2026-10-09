@@ -212,6 +212,8 @@ func TestCustomRulesInspectQueryHeadersAndBody(t *testing.T) {
 	}
 	headerRequest := httptest.NewRequest("GET", "http://app.example.com/", nil)
 	headerRequest.RemoteAddr = "192.0.2.20:45000"
+	headerRequest.URL.Scheme = ""
+	headerRequest.URL.Host = ""
 	headerRequest.Header.Set("X-Attack-Marker", "present")
 	headerResponse := httptest.NewRecorder()
 	a.ServeHTTP(headerResponse, headerRequest)
