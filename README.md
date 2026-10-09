@@ -15,7 +15,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 
 - Responsive English GUI: dashboard, proxy hosts, WAF protection, custom rules, events, and configuration export/import.
 - Exact host routing and longest matching path prefix with path-segment boundaries; routes can be disabled or deleted.
-- HTTP/HTTPS upstreams with certificate verification, optional original Host header, health-aware round-robin balancing across up to 16 backends per route, and active bounded HEAD checks. Transport failures, active checks returning 5xx, and 502/503/504 responses temporarily cool down the selected target; request bodies are never retried.
+- HTTP/HTTPS upstreams with certificate verification, optional original Host header, health-aware round-robin balancing across up to 16 backends per route, active bounded HEAD checks, and optional health-change webhooks. Transport failures, active checks returning 5xx, and 502/503/504 responses temporarily cool down the selected target; request bodies are never retried.
 - WebSocket upgrades; the HTTP handshake is inspected and frames are passed through after the upgrade.
 - TLS 1.2+, manual PEM certificates, or automatic Let's Encrypt certificates for enabled hosts.
 - Coraza **3.8.1** and CRS package **4.25.0**, pinned in `go.mod`/`go.sum`.
@@ -117,6 +117,7 @@ Restart the container. The certificate must cover every domain in use. Manual ce
 - **Response inspection:** disabled by default. When enabled, inspectable MIME types are limited to 1 MiB; larger or compressed inspectable responses are rejected with 502. This is not malware scanning. WebSocket frames and gRPC messages are not inspected.
 - **Capacity:** at most 128 concurrent proxy requests/upgrades and a conservative 256 MiB payload-buffer reservation budget. Exhaustion returns 503. This is not volumetric DDoS protection.
 - **Backends:** active HEAD checks run every 30 seconds by default, with a two-second timeout and at most 16 concurrent probes. Configure `BASTION_UPSTREAM_HEALTH_INTERVAL` between 5 and 300 seconds. HTTP 2xx–499 responses count as reachable; 5xx responses and transport errors trigger cooldown. There are no automatic retries, session affinity, or URL rewrites. Private HTTP(S) backends require the explicit SSRF opt-in. Bastion is not a forward proxy.
+- **Alerts:** set `BASTION_ALERT_WEBHOOK_URL` to receive a JSON POST when an active health check changes a target between reachable and unhealthy. Delivery is asynchronous, bounded to 32 queued alerts, and uses a three-second timeout. No request payloads, cookies, credentials, or WAF match data are sent.
 - **Accounts:** one administrator; no roles, SSO, or MFA. Admin APIs and backend access are highly privileged.
 - **Logs:** query strings, bodies, authorization headers, and Coraza match data are not retained. Paths may still contain application-sensitive values. The audit file is limited to 10 MiB plus one rotation.
 - **Not included:** GeoIP/ASN rules, bot challenges/CAPTCHA, API-schema validation, automatic tuning, threat-intelligence feeds, caching, HTTP/3, and GUI certificate management.
@@ -146,7 +147,7 @@ go build ./cmd/bastion
 
 For local development, use `BASTION_ADMIN_PASSWORD` or `BASTION_ADMIN_PASSWORD_FILE`. Defaults: proxy `:8080`, admin `127.0.0.1:9090`, data `./data`.
 
-Important environment variables: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_ORIGIN`, `BASTION_ADMIN_SECURE_COOKIE`, `BASTION_ALLOW_PRIVATE_UPSTREAMS`, `BASTION_METRICS_TOKEN`, `BASTION_UPSTREAM_HEALTH_INTERVAL`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_ACME_DNS_PROVIDER`, `BASTION_ACME_DNS_API_TOKEN`, `BASTION_ACME_DOMAINS`, `BASTION_ACME_DIRECTORY`, `BASTION_TLS_CERT`, and `BASTION_TLS_KEY`. The built-in Docker health check expects admin port 9090.
+Important environment variables: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_ORIGIN`, `BASTION_ADMIN_SECURE_COOKIE`, `BASTION_ALLOW_PRIVATE_UPSTREAMS`, `BASTION_METRICS_TOKEN`, `BASTION_UPSTREAM_HEALTH_INTERVAL`, `BASTION_ALERT_WEBHOOK_URL`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_ACME_DNS_PROVIDER`, `BASTION_ACME_DNS_API_TOKEN`, `BASTION_ACME_DOMAINS`, `BASTION_ACME_DIRECTORY`, `BASTION_TLS_CERT`, and `BASTION_TLS_KEY`. The built-in Docker health check expects admin port 9090.
 
 For SSRF protection, private, loopback, link-local, and unspecified upstream destinations are rejected by default, including during connection establishment. If the WAF intentionally proxies trusted internal services, set `BASTION_ALLOW_PRIVATE_UPSTREAMS=true` and restrict the host/container network accordingly. The dashboard also supports a persistent light/dark theme toggle and follows the system preference on first use.
 

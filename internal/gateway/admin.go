@@ -192,6 +192,7 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 		stats["routes"] = len(a.state.Load().routes)
 		stats["engine"] = "Coraza + OWASP CRS"
 		stats["upstreamHealthIntervalSeconds"] = int64(a.healthInterval / time.Second)
+		stats["upstreamAlerts"] = a.alertWebhook != ""
 		jsonReply(w, 200, stats)
 	}))
 	mux.HandleFunc("GET /api/analytics", protected(func(w http.ResponseWriter, r *http.Request) {
