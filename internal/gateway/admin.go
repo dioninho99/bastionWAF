@@ -54,11 +54,8 @@ func (a *App) getSession(r *http.Request) (session, bool) {
 	}
 	return s, true
 }
-func (a *App) AdminHandler(assets http.Handler, allowedOrigins ...string) http.Handler {
-	allowedOrigin := ""
-	if len(allowedOrigins) > 0 {
-		allowedOrigin = strings.TrimRight(strings.TrimSpace(allowedOrigins[0]), "/")
-	}
+func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCookie bool) http.Handler {
+	allowedOrigin = strings.TrimRight(strings.TrimSpace(allowedOrigin), "/")
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonReply(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +90,7 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigins ...string) http.H
 		}
 		a.sessions[sha256.Sum256([]byte(token))] = s
 		a.authMu.Unlock()
-		http.SetCookie(w, &http.Cookie{Name: "bastion_session", Value: token, Path: "/", HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 3600})
+		http.SetCookie(w, &http.Cookie{Name: "bastion_session", Value: token, Path: "/", HttpOnly: true, Secure: secureCookie || r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 3600})
 		jsonReply(w, 200, map[string]string{"csrf": s.CSRF})
 	})
 	protected := func(fn http.HandlerFunc) http.HandlerFunc {
@@ -119,7 +116,7 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigins ...string) http.H
 		a.authMu.Lock()
 		delete(a.sessions, sha256.Sum256([]byte(c.Value)))
 		a.authMu.Unlock()
-		http.SetCookie(w, &http.Cookie{Name: "bastion_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteStrictMode})
+		http.SetCookie(w, &http.Cookie{Name: "bastion_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: secureCookie || r.TLS != nil, SameSite: http.SameSiteStrictMode})
 		jsonReply(w, 200, map[string]bool{"ok": true})
 	}))
 	mux.HandleFunc("GET /api/config", protected(func(w http.ResponseWriter, r *http.Request) {

@@ -72,7 +72,7 @@ func normalize(c *Config) {
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 var domainName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
 
-func validate(c Config) error {
+func validate(c Config, allowPrivate bool) error {
 	if c.Mode != "blocking" && c.Mode != "detection" {
 		return errors.New("mode must be blocking or detection")
 	}
@@ -120,6 +120,9 @@ func validate(c Config) error {
 					return errors.New("invalid upstream port")
 				}
 			}
+			if !allowPrivate && upstreamResolvesPrivate(u.Hostname()) {
+				return fmt.Errorf("private upstream %q requires BASTION_ALLOW_PRIVATE_UPSTREAMS=true", s)
+			}
 		}
 		if len(r.ExcludedRuleIDs) > 100 {
 			return errors.New("a maximum of 100 rule exclusions is allowed per route")
@@ -148,7 +151,7 @@ func validate(c Config) error {
 	}
 	return nil
 }
-func loadConfig(path string) (Config, error) {
+func loadConfig(path string, allowPrivate bool) (Config, error) {
 	c := DefaultConfig()
 	b, e := os.ReadFile(path)
 	if os.IsNotExist(e) {
@@ -162,7 +165,27 @@ func loadConfig(path string) (Config, error) {
 		return c, e
 	}
 	normalize(&c)
-	return c, validate(c)
+	return c, validate(c, allowPrivate)
+}
+
+func upstreamResolvesPrivate(host string) bool {
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return isRestrictedUpstreamIP(ip)
+	}
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		return false
+	}
+	for _, raw := range ips {
+		if ip, ok := netip.AddrFromSlice(raw); ok && isRestrictedUpstreamIP(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func isRestrictedUpstreamIP(ip netip.Addr) bool {
+	return ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified()
 }
 func saveConfig(path string, c Config) error {
 	b, e := json.MarshalIndent(c, "", "  ")

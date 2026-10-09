@@ -17,6 +17,8 @@ const testPassword = "test-only-password-not-for-production"
 
 func testApp(t *testing.T) (*App, *httptest.Server, *atomic.Int64) {
 	t.Helper()
+	os.Setenv("BASTION_ALLOW_PRIVATE_UPSTREAMS", "true")
+	t.Cleanup(func() { os.Unsetenv("BASTION_ALLOW_PRIVATE_UPSTREAMS") })
 	hits := new(atomic.Int64)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -234,7 +236,7 @@ func TestConfigValidationAndPersistence(t *testing.T) {
 	if e = a.Update(c, c.Revision); e != errConflict {
 		t.Fatal("expected revision conflict")
 	}
-	saved, e := loadConfig(filepath.Join(dir, "config.json"))
+	saved, e := loadConfig(filepath.Join(dir, "config.json"), true)
 	if e != nil || saved.RateLimit != 45 || saved.Revision != 2 {
 		t.Fatalf("%+v %v", saved, e)
 	}
@@ -253,14 +255,14 @@ func TestConfigValidationAndPersistence(t *testing.T) {
 	}
 	bad = a.Config()
 	bad.Routes = []Route{{ID: "bad", Name: "bad", Host: "example.com", Path: "/", Upstreams: []string{"http://user:pass@localhost"}}}
-	if e = validate(bad); e == nil {
+	if e = validate(bad, true); e == nil {
 		t.Fatal("upstream credentials accepted")
 	}
 }
 func TestAdminAuthCSRFAndConflict(t *testing.T) {
 	a, _, _ := testApp(t)
-	h := a.AdminHandler(http.NotFoundHandler())
-	proxied := a.AdminHandler(http.NotFoundHandler(), "https://admin.example.com")
+	h := a.AdminHandler(http.NotFoundHandler(), "", false)
+	proxied := a.AdminHandler(http.NotFoundHandler(), "https://admin.example.com", true)
 	req := func(method, path, body string, cookie *http.Cookie, csrf, origin, revision string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.RemoteAddr = "127.0.0.1:32100"
@@ -289,6 +291,9 @@ func TestAdminAuthCSRFAndConflict(t *testing.T) {
 	proxied.ServeHTTP(proxiedResp, proxiedReq)
 	if proxiedResp.Code != 200 {
 		t.Fatalf("configured admin origin rejected: %d %s", proxiedResp.Code, proxiedResp.Body.String())
+	}
+	if cookies := proxiedResp.Result().Cookies(); len(cookies) != 1 || !cookies[0].Secure {
+		t.Fatal("reverse-proxy session cookie is not Secure")
 	}
 	w := req("POST", "/api/login", `{"password":"`+testPassword+`"}`, nil, "", "", "")
 	if w.Code != 200 {

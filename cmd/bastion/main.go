@@ -62,7 +62,7 @@ func run() error {
 		return err
 	}
 	defer app.Close()
-	admin := server(env("BASTION_ADMIN_ADDR", "127.0.0.1:9090"), app.AdminHandler(web.Handler(), os.Getenv("BASTION_ADMIN_ORIGIN")))
+	admin := server(env("BASTION_ADMIN_ADDR", "127.0.0.1:9090"), app.AdminHandler(web.Handler(), os.Getenv("BASTION_ADMIN_ORIGIN"), os.Getenv("BASTION_ADMIN_SECURE_COOKIE") == "true"))
 	cert, key := os.Getenv("BASTION_TLS_CERT"), os.Getenv("BASTION_TLS_KEY")
 	email := os.Getenv("BASTION_ACME_EMAIL")
 	if (cert == "") != (key == "") {

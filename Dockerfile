@@ -11,7 +11,7 @@ COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifica
 COPY --from=build --chown=10001:10001 /out/data /data
 COPY --from=build /out/bastion /usr/local/bin/bastion
 USER 10001:10001
-ENV BASTION_DATA_DIR=/data BASTION_ADMIN_ADDR=0.0.0.0:9090
+ENV BASTION_DATA_DIR=/data
 EXPOSE 8080 8443 9090
 VOLUME /data
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["/usr/local/bin/bastion", "healthcheck"]

@@ -21,6 +21,9 @@ const time = v => new Date(v).toLocaleTimeString('en-US', {hour:'2-digit',minute
 const names = {overview:'Overview',routes:'Proxy Hosts',security:'WAF protection',rules:'Custom rules',events:'Events',settings:'Settings'};
 const state = {config:null,status:null,events:[],csrf:'',page:'overview',query:'',action:'',ready:false,busy:false,polling:false,revision:null};
 let toastTimer, searchTimer;
+function setTheme(theme){document.documentElement.dataset.theme=theme;localStorage.setItem('bastion-theme',theme);const button=$('#theme-toggle');if(button)button.textContent=theme==='dark'?'Light mode':'Dark mode';}
+function initTheme(){const saved=localStorage.getItem('bastion-theme');setTheme(saved|| (matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));$('#theme-toggle').addEventListener('click',()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark'));}
+initTheme();
 function toast(message, error=false) { const el=$('#toast'); el.textContent=message;el.classList.toggle('error',error);el.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.hidden=true,5500); }
 async function api(path, options={}) {
  const headers = {...options.headers};
