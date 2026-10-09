@@ -125,7 +125,7 @@ func (m *Manager) obtain(ctx context.Context) error {
 	if err := m.ensureAccount(ctx); err != nil {
 		return err
 	}
-	order, err := m.client.CreateOrder(ctx, &acme.Order{Identifiers: identifiers(m.domains)})
+	order, err := m.client.AuthorizeOrder(ctx, identifiers(m.domains))
 	if err != nil {
 		return err
 	}
@@ -143,7 +143,11 @@ func (m *Manager) obtain(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		recordID, err := m.dns.setTXT(ctx, zoneID, recordName, m.client.DNS01ChallengeRecord(challenge.Token))
+		challengeRecord, err := m.client.DNS01ChallengeRecord(challenge.Token)
+		if err != nil {
+			return err
+		}
+		recordID, err := m.dns.setTXT(ctx, zoneID, recordName, challengeRecord)
 		if err != nil {
 			return err
 		}
@@ -167,7 +171,13 @@ func (m *Manager) obtain(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	der, _, err := m.client.CreateCert(ctx, order.Certificate, certKey, true)
+	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		DNSNames: m.domains,
+	}, certKey)
+	if err != nil {
+		return err
+	}
+	der, _, err := m.client.CreateOrderCert(ctx, order.FinalizeURL, csr, true)
 	if err != nil {
 		return err
 	}
