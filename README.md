@@ -15,7 +15,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 
 - Responsive English GUI: dashboard, proxy hosts, WAF protection, custom rules, events, and configuration export/import.
 - Exact host routing and longest matching path prefix with path-segment boundaries; routes can be disabled or deleted.
-- HTTP/HTTPS upstreams with certificate verification, optional original Host header, and round-robin balancing across up to 16 backends per route.
+- HTTP/HTTPS upstreams with certificate verification, optional original Host header, and health-aware round-robin balancing across up to 16 backends per route. Transport failures and 502/503/504 responses temporarily cool down the selected target; request bodies are never retried.
 - WebSocket upgrades; the HTTP handshake is inspected and frames are passed through after the upgrade.
 - TLS 1.2+, manual PEM certificates, or automatic Let's Encrypt certificates for enabled hosts.
 - Coraza **3.8.1** and CRS package **4.25.0**, pinned in `go.mod`/`go.sum`.
@@ -123,7 +123,7 @@ Restart the container. The certificate must cover every domain in use. Manual ce
 
 ## Monitoring and backup
 
-Health check: `GET /healthz` on the admin port, without login. It checks the process/listeners, not backend health.
+Health check: `GET /healthz` on the admin port, without login. It checks the process/listeners, not backend health. Authenticated `GET /api/upstreams` exposes runtime target health, failure counts, cooldowns, and the last observed status/error; `/api/upstreams/status` provides the same focused status view.
 
 Prometheus: `GET /metrics` with an admin session or `Authorization: Bearer <admin-password>`. Query it only from the trusted management network; the password grants full admin access.
 

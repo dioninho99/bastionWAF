@@ -23,7 +23,7 @@ import (
 
 type routeRuntime struct {
 	config  Route
-	targets []*url.URL
+	targets []*upstreamTarget
 	next    atomic.Uint64
 	waf     coraza.WAF
 	mode    string
@@ -31,6 +31,15 @@ type routeRuntime struct {
 	threshold int
 	maxBodyBytes int64
 	rateLimit int
+}
+type upstreamTarget struct {
+	url *url.URL
+	mu sync.RWMutex
+	failureCount int
+	unhealthyUntil time.Time
+	lastStatus int
+	lastError string
+	lastCheck time.Time
 }
 type snapshot struct {
 	config Config
@@ -150,7 +159,7 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 		rt := &routeRuntime{config: r, mode: mode, paranoia: paranoia, threshold: threshold, maxBodyBytes: maxBodyBytes, rateLimit: rateLimit}
 		for _, raw := range r.Upstreams {
 			u, _ := url.Parse(raw)
-			rt.targets = append(rt.targets, u)
+			rt.targets = append(rt.targets, &upstreamTarget{url: u})
 		}
 		cacheKey := fmt.Sprintf("%s|%d|%d|%d|%t", mode, paranoia, threshold, maxBodyBytes, c.ResponseInspection)
 		exclusions := ""

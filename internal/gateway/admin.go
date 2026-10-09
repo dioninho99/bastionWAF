@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -168,33 +167,43 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 	}))
 	mux.HandleFunc("GET /api/upstreams", protected(func(w http.ResponseWriter, r *http.Request) {
 		type result struct {
-			Route   string `json:"route"`
-			Target  string `json:"target"`
-			Healthy bool   `json:"healthy"`
-			Status int    `json:"status,omitempty"`
-			Error   string `json:"error,omitempty"`
+			Route          string     `json:"route"`
+			Target         string     `json:"target"`
+			Healthy        bool       `json:"healthy"`
+			FailureCount   int        `json:"failureCount"`
+			UnhealthyUntil *time.Time `json:"unhealthyUntil,omitempty"`
+			Status         int        `json:"status,omitempty"`
+			Error          string     `json:"error,omitempty"`
+			LastCheck      *time.Time `json:"lastCheck,omitempty"`
 		}
 		results := make([]result, 0)
+		now := time.Now()
 		for _, route := range a.state.Load().routes {
 			for _, target := range route.targets {
-				ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-				req, err := http.NewRequestWithContext(ctx, http.MethodHead, target.String(), nil)
-				if err != nil {
-					cancel()
-					results = append(results, result{Route: route.config.ID, Target: target.String(), Error: "invalid target"})
-					continue
+				h := target.snapshot(now)
+				item := result{Route: route.config.ID, Target: target.url.String(), Healthy: h.Healthy, FailureCount: h.FailureCount, Status: h.LastStatus, Error: h.LastError}
+				if !h.UnhealthyUntil.IsZero() {
+					item.UnhealthyUntil = &h.UnhealthyUntil
 				}
-				resp, err := a.transport.RoundTrip(req)
-				cancel()
-				item := result{Route: route.config.ID, Target: target.String()}
-				if err != nil {
-					item.Error = "unreachable"
-				} else {
-					item.Status = resp.StatusCode
-					item.Healthy = resp.StatusCode < 500
-					resp.Body.Close()
+				if !h.LastCheck.IsZero() {
+					item.LastCheck = &h.LastCheck
 				}
 				results = append(results, item)
+			}
+		}
+		jsonReply(w, 200, results)
+	}))
+	mux.HandleFunc("GET /api/upstreams/status", protected(func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now()
+		results := make([]map[string]any, 0)
+		for _, route := range a.state.Load().routes {
+			for _, target := range route.targets {
+				h := target.snapshot(now)
+				results = append(results, map[string]any{
+					"route": route.config.ID, "target": target.url.String(), "healthy": h.Healthy,
+					"failureCount": h.FailureCount, "unhealthyUntil": h.UnhealthyUntil,
+					"lastStatus": h.LastStatus, "lastError": h.LastError, "lastCheck": h.LastCheck,
+				})
 			}
 		}
 		jsonReply(w, 200, results)

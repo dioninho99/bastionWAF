@@ -250,7 +250,7 @@ methodAllowed:
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	r.ContentLength = int64(len(body))
 	r.TransferEncoding = nil
-	target := route.targets[(route.next.Add(1)-1)%uint64(len(route.targets))]
+	target := route.selectTarget(time.Now())
 	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 		defer cancel()
@@ -259,7 +259,7 @@ methodAllowed:
 	proxy := &httputil.ReverseProxy{
 		Transport: a.transport, FlushInterval: -1,
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(target)
+			pr.SetURL(target.url)
 			if route.config.PreserveHost {
 				pr.Out.Host = pr.In.Host
 			}
@@ -330,6 +330,12 @@ methodAllowed:
 			resp.Header.Set("X-Request-ID", ev.ID)
 			resp.Header.Set("X-Content-Type-Options", "nosniff")
 			ev.Status = resp.StatusCode
+			now := time.Now()
+			if upstreamFailureStatus(resp.StatusCode) {
+				target.markFailure(resp.StatusCode, http.StatusText(resp.StatusCode), now)
+			} else {
+				target.markSuccess(resp.StatusCode, now)
+			}
 			return nil
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, e error) {
@@ -339,6 +345,7 @@ methodAllowed:
 			} else {
 				ev.Action = "error"
 				ev.Reason = "upstream unreachable or response cannot be inspected"
+				target.markFailure(0, e.Error(), time.Now())
 			}
 			deny(w, ev.Status, ev.ID)
 		},
