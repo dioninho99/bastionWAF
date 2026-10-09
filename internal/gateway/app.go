@@ -1,11 +1,15 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -41,13 +45,15 @@ type App struct {
 	transport    *http.Transport
 	slots        chan struct{}
 	bodyMemory   *semaphore.Weighted
+	allowPrivateUpstreams bool
 }
 
 func New(dir, password string) (*App, error) {
 	if len(password) < 20 {
 		return nil, errors.New("BASTION_ADMIN_PASSWORD must be at least 20 characters long")
 	}
-	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128)}
+	allowPrivate := os.Getenv("BASTION_ALLOW_PRIVATE_UPSTREAMS") == "true"
+	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)
 	a.transport = http.DefaultTransport.(*http.Transport).Clone()
 	a.transport.Proxy = nil
@@ -57,11 +63,36 @@ func New(dir, password string) (*App, error) {
 	a.transport.MaxIdleConnsPerHost = 32
 	a.transport.MaxConnsPerHost = 128
 	a.transport.DisableCompression = true
-	c, e := loadConfig(a.configPath)
+	if !allowPrivate {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		a.transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(address)
+			if err != nil {
+				return nil, err
+			}
+			ips, err := net.LookupIP(host)
+			if err != nil {
+				return nil, fmt.Errorf("upstream DNS lookup failed: %w", err)
+			}
+			for _, raw := range ips {
+				ip, ok := netip.AddrFromSlice(raw)
+				if !ok || isRestrictedUpstreamIP(ip) {
+					continue
+				}
+				conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+				if dialErr == nil {
+					return conn, nil
+				}
+				err = dialErr
+			}
+			return nil, errors.New("upstream destination is not allowed")
+		}
+	}
+	c, e := loadConfig(a.configPath, allowPrivate)
 	if e != nil {
 		return nil, e
 	}
-	s, e := compile(c)
+	s, e := compile(c, allowPrivate)
 	if e != nil {
 		return nil, e
 	}
@@ -82,8 +113,8 @@ func (a *App) HostAllowed(host string) bool {
 	}
 	return false
 }
-func compile(c Config) (*snapshot, error) {
-	if err := validate(c); err != nil {
+func compile(c Config, allowPrivate bool) (*snapshot, error) {
+	if err := validate(c, allowPrivate); err != nil {
 		return nil, err
 	}
 	s := &snapshot{config: c}
@@ -134,7 +165,7 @@ func (a *App) Update(c Config, revision int64) error {
 	}
 	c.Revision = revision + 1
 	normalize(&c)
-	next, err := compile(c)
+	next, err := compile(c, a.allowPrivateUpstreams)
 	if err != nil {
 		return err
 	}
