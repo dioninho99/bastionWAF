@@ -31,7 +31,9 @@ async function api(path, options={}) {
  if(options.body){headers['Content-Type']='application/json'; options.body=JSON.stringify(options.body);}
  if(options.method && options.method!=='GET') headers['X-CSRF-Token']=state.csrf;
  const res=await fetch(path,{...options,headers,credentials:'same-origin'});
- const data=await res.json();
+ const raw=await res.text();
+ let data={};
+ if(raw.trim()){try{data=JSON.parse(raw);}catch{throw new Error(res.ok?'The gateway returned an invalid response':`HTTP ${res.status}: ${raw.trim().slice(0,160)}`);}}
  if(!res.ok){if(res.status===401 && path!=='/api/login')showLogin();throw new Error(data.error||`HTTP ${res.status}`);}
  return data;
 }
