@@ -51,3 +51,21 @@ func TestConfiguredHealthIntervalBounds(t *testing.T) {
 		}
 	}
 }
+
+func TestConfiguredAlertWebhookValidation(t *testing.T) {
+	t.Setenv("BASTION_ALERT_WEBHOOK_URL", "https://alerts.example.test/hook")
+	got, err := configuredAlertWebhook()
+	if err != nil || got == "" {
+		t.Fatalf("valid webhook rejected: %q, %v", got, err)
+	}
+	for _, value := range []string{
+		"ftp://alerts.example.test/hook",
+		"******alerts.example.test/hook",
+		"https://alerts.example.test/hook?secret=1",
+	} {
+		t.Setenv("BASTION_ALERT_WEBHOOK_URL", value)
+		if _, err := configuredAlertWebhook(); err == nil {
+			t.Fatalf("invalid webhook %q was accepted", value)
+		}
+	}
+}

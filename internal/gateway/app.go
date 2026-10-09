@@ -67,6 +67,9 @@ type App struct {
 	healthInterval time.Duration
 	healthStop chan struct{}
 	healthWG sync.WaitGroup
+	alertWebhook string
+	alerts chan upstreamAlert
+	alertWG sync.WaitGroup
 }
 
 func New(dir, password string) (*App, error) {
@@ -82,7 +85,11 @@ func New(dir, password string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), metricsToken: sha256.Sum256([]byte(metricsToken)), metricsTokenSet: metricsToken != "", sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate, healthInterval: healthInterval, healthStop: make(chan struct{})}
+	alertWebhook, err := configuredAlertWebhook()
+	if err != nil {
+		return nil, err
+	}
+	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), metricsToken: sha256.Sum256([]byte(metricsToken)), metricsTokenSet: metricsToken != "", sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate, healthInterval: healthInterval, healthStop: make(chan struct{}), alertWebhook: alertWebhook, alerts: make(chan upstreamAlert, 32)}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)
 	a.transport = http.DefaultTransport.(*http.Transport).Clone()
 	a.transport.Proxy = nil
@@ -132,9 +139,13 @@ func New(dir, password string) (*App, error) {
 	}
 	a.healthWG.Add(1)
 	go a.healthLoop()
+	if a.alertWebhook != "" {
+		a.alertWG.Add(1)
+		go a.alertLoop()
+	}
 	return a, nil
 }
-func (a *App) Close()         { close(a.healthStop); a.healthWG.Wait(); a.transport.CloseIdleConnections(); a.Events.close() }
+func (a *App) Close()         { close(a.healthStop); a.healthWG.Wait(); close(a.alerts); a.alertWG.Wait(); a.transport.CloseIdleConnections(); a.Events.close() }
 func (a *App) Config() Config { return a.state.Load().config }
 func (a *App) HostAllowed(host string) bool {
 	for _, r := range a.state.Load().routes {
@@ -245,4 +256,19 @@ func configuredHealthInterval() (time.Duration, error) {
 		return 0, fmt.Errorf("BASTION_UPSTREAM_HEALTH_INTERVAL must be between %d and %d seconds", int(minHealthInterval/time.Second), int(maxHealthInterval/time.Second))
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+func configuredAlertWebhook() (string, error) {
+	raw := strings.TrimSpace(os.Getenv("BASTION_ALERT_WEBHOOK_URL"))
+	if raw == "" {
+		return "", nil
+	}
+	if len(raw) > 2048 {
+		return "", errors.New("BASTION_ALERT_WEBHOOK_URL must be at most 2048 characters")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("BASTION_ALERT_WEBHOOK_URL must be an HTTP(S) URL without credentials, query, or fragment")
+	}
+	return raw, nil
 }
