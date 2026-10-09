@@ -237,6 +237,8 @@ func TestRouteSecurityPolicies(t *testing.T) {
 		t.Fatalf("method policy: %d %q", w.Code, w.Header().Get("Allow"))
 	}
 	r := httptest.NewRequest("GET", "http://app.example.com/", nil)
+	r.URL.Scheme = ""
+	r.URL.Host = ""
 	r.RemoteAddr = "192.0.2.21:45000"
 	r.Header.Set("User-Agent", "Friendly Curl")
 	w := httptest.NewRecorder()
