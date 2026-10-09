@@ -16,8 +16,13 @@ import (
 
 type session struct {
 	CSRF    string
+	Created time.Time
+	LastSeen time.Time
 	Expires time.Time
+	Client  string
 }
+
+const sessionIdleTimeout = 30 * time.Minute
 
 func jsonReply(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -48,10 +53,13 @@ func (a *App) getSession(r *http.Request) (session, bool) {
 	a.authMu.Lock()
 	defer a.authMu.Unlock()
 	s, ok := a.sessions[key]
-	if !ok || time.Now().After(s.Expires) {
+	now := time.Now()
+	if !ok || now.After(s.Expires) || now.Sub(s.LastSeen) > sessionIdleTimeout {
 		delete(a.sessions, key)
 		return session{}, false
 	}
+	s.LastSeen = now
+	a.sessions[key] = s
 	return s, true
 }
 func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCookie bool) http.Handler {
@@ -76,7 +84,8 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 			return
 		}
 		token := randomID()
-		s := session{CSRF: randomID(), Expires: time.Now().Add(8 * time.Hour)}
+		now := time.Now()
+		s := session{CSRF: randomID(), Created: now, LastSeen: now, Expires: now.Add(8 * time.Hour), Client: clientIP(r)}
 		a.authMu.Lock()
 		for k, v := range a.sessions {
 			if time.Now().After(v.Expires) {
@@ -115,6 +124,36 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 		c, _ := r.Cookie("bastion_session")
 		a.authMu.Lock()
 		delete(a.sessions, sha256.Sum256([]byte(c.Value)))
+		a.authMu.Unlock()
+		http.SetCookie(w, &http.Cookie{Name: "bastion_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: secureCookie || r.TLS != nil, SameSite: http.SameSiteStrictMode})
+		jsonReply(w, 200, map[string]bool{"ok": true})
+	}))
+	mux.HandleFunc("GET /api/sessions", protected(func(w http.ResponseWriter, r *http.Request) {
+		type sessionInfo struct {
+			Created  time.Time `json:"created"`
+			LastSeen time.Time `json:"lastSeen"`
+			Expires  time.Time `json:"expires"`
+			Client   string    `json:"client"`
+			Current  bool      `json:"current"`
+		}
+		c, _ := r.Cookie("bastion_session")
+		current := sha256.Sum256([]byte(c.Value))
+		a.authMu.Lock()
+		defer a.authMu.Unlock()
+		now := time.Now()
+		result := make([]sessionInfo, 0, len(a.sessions))
+		for key, s := range a.sessions {
+			if now.After(s.Expires) || now.Sub(s.LastSeen) > sessionIdleTimeout {
+				delete(a.sessions, key)
+				continue
+			}
+			result = append(result, sessionInfo{Created: s.Created, LastSeen: s.LastSeen, Expires: s.Expires, Client: s.Client, Current: key == current})
+		}
+		jsonReply(w, 200, result)
+	}))
+	mux.HandleFunc("POST /api/sessions/revoke-all", protected(func(w http.ResponseWriter, r *http.Request) {
+		a.authMu.Lock()
+		a.sessions = map[[32]byte]session{}
 		a.authMu.Unlock()
 		http.SetCookie(w, &http.Cookie{Name: "bastion_session", Path: "/", MaxAge: -1, HttpOnly: true, Secure: secureCookie || r.TLS != nil, SameSite: http.SameSiteStrictMode})
 		jsonReply(w, 200, map[string]bool{"ok": true})
@@ -231,7 +270,8 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 		_, sessionOK := a.getSession(r)
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		hash := sha256.Sum256([]byte(token))
-		if !sessionOK && subtle.ConstantTimeCompare(hash[:], a.password[:]) != 1 {
+		tokenOK := a.metricsTokenSet && subtle.ConstantTimeCompare(hash[:], a.metricsToken[:]) == 1
+		if !sessionOK && !tokenOK {
 			apiError(w, 401, "authentication required")
 			return
 		}

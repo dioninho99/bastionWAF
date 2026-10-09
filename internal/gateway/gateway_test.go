@@ -418,3 +418,56 @@ func TestAdminAuthCSRFAndConflict(t *testing.T) {
 		t.Fatal("session survived logout")
 	}
 }
+
+func TestMetricsTokenAndSessionRevocation(t *testing.T) {
+	t.Setenv("BASTION_METRICS_TOKEN", "metrics-token-with-at-least-32-characters")
+	a, _, _ := testApp(t)
+	h := a.AdminHandler(http.NotFoundHandler(), "", false)
+	login := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"password":"`+testPassword+`"}`))
+	h.ServeHTTP(login, req)
+	if login.Code != 200 {
+		t.Fatalf("login failed: %d %s", login.Code, login.Body.String())
+	}
+	cookies := login.Result().Cookies()
+	var credentials map[string]string
+	if err := json.Unmarshal(login.Body.Bytes(), &credentials); err != nil {
+		t.Fatal(err)
+	}
+	metrics := httptest.NewRecorder()
+	passwordMetrics := httptest.NewRequest("GET", "/metrics", nil)
+	passwordMetrics.Header.Set("Authorization", "Bearer "+testPassword)
+	h.ServeHTTP(metrics, passwordMetrics)
+	if metrics.Code != 401 {
+		t.Fatalf("admin password was accepted as metrics token: %d", metrics.Code)
+	}
+	metrics = httptest.NewRecorder()
+	tokenMetrics := httptest.NewRequest("GET", "/metrics", nil)
+	tokenMetrics.Header.Set("Authorization", "Bearer "+os.Getenv("BASTION_METRICS_TOKEN"))
+	h.ServeHTTP(metrics, tokenMetrics)
+	if metrics.Code != 200 {
+		t.Fatalf("metrics token rejected: %d %s", metrics.Code, metrics.Body.String())
+	}
+	sessions := httptest.NewRecorder()
+	sessionReq := httptest.NewRequest("GET", "/api/sessions", nil)
+	sessionReq.AddCookie(cookies[0])
+	h.ServeHTTP(sessions, sessionReq)
+	if sessions.Code != 200 || !strings.Contains(sessions.Body.String(), `"current":true`) {
+		t.Fatalf("session listing failed: %d %s", sessions.Code, sessions.Body.String())
+	}
+	revoke := httptest.NewRecorder()
+	revokeReq := httptest.NewRequest("POST", "/api/sessions/revoke-all", nil)
+	revokeReq.AddCookie(cookies[0])
+	revokeReq.Header.Set("X-CSRF-Token", credentials["csrf"])
+	h.ServeHTTP(revoke, revokeReq)
+	if revoke.Code != 200 {
+		t.Fatalf("session revocation failed: %d %s", revoke.Code, revoke.Body.String())
+	}
+	protected := httptest.NewRecorder()
+	protectedReq := httptest.NewRequest("GET", "/api/status", nil)
+	protectedReq.AddCookie(cookies[0])
+	h.ServeHTTP(protected, protectedReq)
+	if protected.Code != 401 {
+		t.Fatalf("revoked session remained valid: %d", protected.Code)
+	}
+}
