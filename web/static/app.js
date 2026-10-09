@@ -33,7 +33,7 @@ async function api(path, options={}) {
  const res=await fetch(path,{...options,headers,credentials:'same-origin'});
  const raw=await res.text();
  let data={};
- if(raw.trim()){try{data=JSON.parse(raw);}catch{throw new Error(res.ok?'The gateway returned an invalid response':`HTTP ${res.status}: ${raw.trim().slice(0,160)}`);}}
+ if(raw.trim()){try{data=JSON.parse(raw);}catch{let detail=raw.trim().replace(/\s+/g,' ').slice(0,160);if(raw.includes('<')){const doc=new DOMParser().parseFromString(raw,'text/html');detail=(doc.querySelector('title')?.textContent||doc.body?.textContent||detail).replace(/\s+/g,' ').trim().slice(0,160);}throw new Error(res.ok?'The gateway returned an invalid response':`HTTP ${res.status}: ${detail}`);}}
  if(!res.ok){if(res.status===401 && path!=='/api/login')showLogin();throw new Error(data.error||`HTTP ${res.status}`);}
  return data;
 }
