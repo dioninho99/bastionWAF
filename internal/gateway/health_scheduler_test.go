@@ -44,28 +44,28 @@ func TestConfiguredHealthIntervalBounds(t *testing.T) {
 	if err != nil || got != 10*time.Second {
 		t.Fatalf("configured interval = %s, %v", got, err)
 	}
-
-	func TestConfiguredAlertWebhookValidation(t *testing.T) {
-		t.Setenv("BASTION_ALERT_WEBHOOK_URL", "https://alerts.example.test/hook")
-		got, err := configuredAlertWebhook()
-		if err != nil || got == "" {
-			t.Fatalf("valid webhook rejected: %q, %v", got, err)
-		}
-		for _, value := range []string{
-			"ftp://alerts.example.test/hook",
-			"https://user:pass@alerts.example.test/hook",
-			"https://alerts.example.test/hook?secret=1",
-		} {
-			t.Setenv("BASTION_ALERT_WEBHOOK_URL", value)
-			if _, err := configuredAlertWebhook(); err == nil {
-				t.Fatalf("invalid webhook %q was accepted", value)
-			}
-		}
-	}
 	for _, value := range []string{"4", "301", "not-a-number"} {
 		t.Setenv("BASTION_UPSTREAM_HEALTH_INTERVAL", value)
 		if _, err := configuredHealthInterval(); err == nil {
 			t.Fatalf("invalid interval %q was accepted", value)
+		}
+	}
+}
+
+func TestConfiguredAlertWebhookValidation(t *testing.T) {
+	t.Setenv("BASTION_ALERT_WEBHOOK_URL", "https://alerts.example.test/hook")
+	got, err := configuredAlertWebhook()
+	if err != nil || got == "" {
+		t.Fatalf("valid webhook rejected: %q, %v", got, err)
+	}
+	for _, value := range []string{
+		"ftp://alerts.example.test/hook",
+		"******alerts.example.test/hook",
+		"https://alerts.example.test/hook?secret=1",
+	} {
+		t.Setenv("BASTION_ALERT_WEBHOOK_URL", value)
+		if _, err := configuredAlertWebhook(); err == nil {
+			t.Fatalf("invalid webhook %q was accepted", value)
 		}
 	}
 }

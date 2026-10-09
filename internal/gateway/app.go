@@ -251,24 +251,24 @@ func configuredHealthInterval() (time.Duration, error) {
 	if raw == "" {
 		return defaultHealthInterval, nil
 	}
-
-	func configuredAlertWebhook() (string, error) {
-		raw := strings.TrimSpace(os.Getenv("BASTION_ALERT_WEBHOOK_URL"))
-		if raw == "" {
-			return "", nil
-		}
-		if len(raw) > 2048 {
-			return "", errors.New("BASTION_ALERT_WEBHOOK_URL must be at most 2048 characters")
-		}
-		u, err := url.Parse(raw)
-		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-			return "", errors.New("BASTION_ALERT_WEBHOOK_URL must be an HTTP(S) URL without credentials, query, or fragment")
-		}
-		return raw, nil
-	}
 	seconds, err := strconv.Atoi(raw)
 	if err != nil || seconds < int(minHealthInterval/time.Second) || seconds > int(maxHealthInterval/time.Second) {
 		return 0, fmt.Errorf("BASTION_UPSTREAM_HEALTH_INTERVAL must be between %d and %d seconds", int(minHealthInterval/time.Second), int(maxHealthInterval/time.Second))
 	}
 	return time.Duration(seconds) * time.Second, nil
+}
+
+func configuredAlertWebhook() (string, error) {
+	raw := strings.TrimSpace(os.Getenv("BASTION_ALERT_WEBHOOK_URL"))
+	if raw == "" {
+		return "", nil
+	}
+	if len(raw) > 2048 {
+		return "", errors.New("BASTION_ALERT_WEBHOOK_URL must be at most 2048 characters")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("BASTION_ALERT_WEBHOOK_URL must be an HTTP(S) URL without credentials, query, or fragment")
+	}
+	return raw, nil
 }
