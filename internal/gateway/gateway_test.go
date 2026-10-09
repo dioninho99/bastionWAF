@@ -283,7 +283,7 @@ func TestAdminAuthCSRFAndConflict(t *testing.T) {
 	if w := req("POST", "/api/login", `{"password":"`+testPassword+`"}`, nil, "", "https://evil.example", ""); w.Code != 403 {
 		t.Fatal(w.Code)
 	}
-	proxiedReq := httptest.NewRequest("POST", "/api/login", `{"password":"`+testPassword+`"}`)
+	proxiedReq := httptest.NewRequest("POST", "/api/login", strings.NewReader(`{"password":"`+testPassword+`"}`))
 	proxiedReq.Header.Set("Origin", "https://admin.example.com")
 	proxiedResp := httptest.NewRecorder()
 	proxied.ServeHTTP(proxiedResp, proxiedReq)
