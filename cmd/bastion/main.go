@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	acmeclient "bastionwaf/internal/acme"
 	"bastionwaf/internal/gateway"
 	"bastionwaf/web"
 	"golang.org/x/crypto/acme/autocert"
@@ -61,19 +62,36 @@ func run() error {
 	if err != nil {
 		return err
 	}
+
 	defer app.Close()
 	admin := server(env("BASTION_ADMIN_ADDR", "127.0.0.1:9090"), app.AdminHandler(web.Handler(), os.Getenv("BASTION_ADMIN_ORIGIN"), os.Getenv("BASTION_ADMIN_SECURE_COOKIE") == "true"))
 	cert, key := os.Getenv("BASTION_TLS_CERT"), os.Getenv("BASTION_TLS_KEY")
 	email := os.Getenv("BASTION_ACME_EMAIL")
+	dnsProvider := strings.ToLower(strings.TrimSpace(os.Getenv("BASTION_ACME_DNS_PROVIDER")))
+	dnsDomains := splitCSV(os.Getenv("BASTION_ACME_DOMAINS"))
 	if (cert == "") != (key == "") {
 		return errors.New("TLS_CERT and TLS_KEY must be set together")
 	}
 	if cert != "" && email != "" {
 		return errors.New("choose either manual TLS certificates or ACME")
 	}
+	if dnsProvider != "" && dnsProvider != "cloudflare" {
+		return errors.New("BASTION_ACME_DNS_PROVIDER must be cloudflare")
+	}
+	if dnsProvider != "" && email == "" {
+		return errors.New("BASTION_ACME_EMAIL is required for DNS-01 ACME")
+	}
 	tlsEnabled := cert != "" || email != ""
 	httpHandler := http.Handler(app)
 	var manager *autocert.Manager
+	var dnsManager *acmeclient.Manager
+	if dnsProvider == "cloudflare" {
+		dnsManager, err = acmeclient.NewCloudflare(context.Background(), filepath.Join(data, "acme-dns"), email, os.Getenv("BASTION_ACME_DNS_API_TOKEN"), dnsDomains)
+		if err != nil {
+			return err
+		}
+		defer dnsManager.Close()
+	}
 	if tlsEnabled {
 		httpHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			host := r.Host
@@ -87,7 +105,7 @@ func run() error {
 			}
 			http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusPermanentRedirect)
 		})
-		if email != "" {
+		if email != "" && dnsManager == nil {
 			manager = &autocert.Manager{Prompt: autocert.AcceptTOS, Email: email, Cache: autocert.DirCache(filepath.Join(data, "acme")), HostPolicy: func(ctx context.Context, host string) error {
 				if app.HostAllowed(host) {
 					return nil
@@ -108,12 +126,16 @@ func run() error {
 			secure.TLSConfig = manager.TLSConfig()
 			secure.TLSConfig.MinVersion = tls.VersionTLS12
 		}
+		if dnsManager != nil {
+			secure.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: dnsManager.GetCertificate}
+		}
 		servers = append(servers, secure)
 		go func() {
 			slog.Info("TLS proxy listening", "address", secure.Addr)
 			errs <- secure.ListenAndServeTLS(cert, key)
 		}()
 	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	select {
@@ -131,4 +153,14 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+func splitCSV(value string) []string {
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }
