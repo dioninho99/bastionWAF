@@ -181,13 +181,25 @@ func validate(c Config, allowPrivate bool) error {
 		}
 	}
 	ids = map[string]bool{}
+	if len(c.Rules) > 64 {
+		return errors.New("a maximum of 64 custom rules is supported")
+	}
+	bodyRules := 0
 	for _, r := range c.Rules {
 		if !identifier.MatchString(r.ID) || ids[r.ID] || len(r.Name) < 1 || len(r.Name) > 100 {
 			return errors.New("custom rule is invalid or duplicated")
 		}
 		ids[r.ID] = true
-		if r.Field != "path" && r.Field != "user-agent" && r.Field != "method" {
-			return errors.New("rule field must be path, user-agent, or method")
+		switch r.Field {
+		case "path", "query", "header", "user-agent", "method", "body":
+			if r.Field == "body" {
+				bodyRules++
+				if bodyRules > 16 {
+					return errors.New("a maximum of 16 body custom rules is supported")
+				}
+			}
+		default:
+			return errors.New("rule field must be path, query, header, user-agent, method, or body")
 		}
 		if r.Action != "block" && r.Action != "log" {
 			return errors.New("rule action must be block or log")
