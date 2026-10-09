@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -52,6 +53,8 @@ type App struct {
 	Events       *EventStore
 	started      time.Time
 	password     [32]byte
+	metricsToken  [32]byte
+	metricsTokenSet bool
 	authMu       sync.Mutex
 	sessions     map[[32]byte]session
 	loginLimit   limiter
@@ -66,8 +69,12 @@ func New(dir, password string) (*App, error) {
 	if len(password) < 20 {
 		return nil, errors.New("BASTION_ADMIN_PASSWORD must be at least 20 characters long")
 	}
+	metricsToken := strings.TrimSpace(os.Getenv("BASTION_METRICS_TOKEN"))
+	if metricsToken != "" && len(metricsToken) < 32 {
+		return nil, errors.New("BASTION_METRICS_TOKEN must be at least 32 characters long")
+	}
 	allowPrivate := os.Getenv("BASTION_ALLOW_PRIVATE_UPSTREAMS") == "true"
-	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate}
+	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), metricsToken: sha256.Sum256([]byte(metricsToken)), metricsTokenSet: metricsToken != "", sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)
 	a.transport = http.DefaultTransport.(*http.Transport).Clone()
 	a.transport.Proxy = nil

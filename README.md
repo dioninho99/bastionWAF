@@ -28,7 +28,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - Route rate and body limits can only be stricter than (or equal to) the global limits, preventing a route policy from bypassing product-wide hard limits. Method and bot restrictions are enforced before WAF inspection and recorded in the audit stream.
 - Optional response inspection for MIME types supported by Coraza before data is sent to the client.
 - Events with request ID, CRS IDs, IP, host, path, status, and duration; JSON export and rotating JSONL files.
-- Password login, HttpOnly/SameSite cookies, CSRF and Origin checks, login limiting, and protected Prometheus metrics.
+- Password login, HttpOnly/SameSite cookies, CSRF and Origin checks, login limiting, idle/absolute session expiry, session revocation, and protected Prometheus metrics.
 - Atomic configuration persistence and activation without restart; revisions prevent concurrent overwrites.
 
 ## Start in the LXC
@@ -111,7 +111,7 @@ Restart the container. The certificate must cover every domain in use. Manual ce
 
 ## Operating behavior and limits
 
-- **Single instance:** configuration is stored on a local volume; rate limits, sessions, and dashboard counters are in memory. There are no distributed limits or HA synchronization. Sessions expire after eight hours or restart. The JSONL archive persists; the UI shows at most 1,000 events from the current process.
+- **Single instance:** configuration is stored on a local volume; rate limits, sessions, and dashboard counters are in memory. There are no distributed limits or HA synchronization. Sessions expire after 30 minutes of inactivity, eight hours absolute, or restart. The authenticated session API can list sessions and revoke them all. The JSONL archive persists; the UI shows at most 1,000 events from the current process.
 - **Direct edge operation:** client IP comes from the TCP peer. Forwarded, `X-Forwarded-*`, and `X-Real-IP` headers are discarded and rebuilt. There is no trusted-proxy/CDN support.
 - **Uploads:** default 2 MiB per request, configurable from 1 KiB to 32 MiB. The complete request is buffered before forwarding. Compressed request bodies are rejected with 415.
 - **Response inspection:** disabled by default. When enabled, inspectable MIME types are limited to 1 MiB; larger or compressed inspectable responses are rejected with 502. This is not malware scanning. WebSocket frames and gRPC messages are not inspected.
@@ -125,7 +125,7 @@ Restart the container. The certificate must cover every domain in use. Manual ce
 
 Health check: `GET /healthz` on the admin port, without login. It checks the process/listeners, not backend health. Authenticated `GET /api/upstreams` exposes runtime target health, failure counts, cooldowns, and the last observed status/error; `/api/upstreams/status` provides the same focused status view.
 
-Prometheus: `GET /metrics` with an admin session or `Authorization: Bearer <admin-password>`. Query it only from the trusted management network; the password grants full admin access.
+Prometheus: `GET /metrics` with an admin session or a dedicated metrics token from `BASTION_METRICS_TOKEN`. The admin password is never accepted as a bearer token. Generate at least 32 random characters, keep the endpoint on the trusted management network, and rotate the token by restarting Bastion.
 
 ```sh
 docker compose logs -f --tail=100 bastion
@@ -146,7 +146,7 @@ go build ./cmd/bastion
 
 For local development, use `BASTION_ADMIN_PASSWORD` or `BASTION_ADMIN_PASSWORD_FILE`. Defaults: proxy `:8080`, admin `127.0.0.1:9090`, data `./data`.
 
-Important environment variables: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_ORIGIN`, `BASTION_ADMIN_SECURE_COOKIE`, `BASTION_ALLOW_PRIVATE_UPSTREAMS`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_ACME_DNS_PROVIDER`, `BASTION_ACME_DNS_API_TOKEN`, `BASTION_ACME_DOMAINS`, `BASTION_ACME_DIRECTORY`, `BASTION_TLS_CERT`, and `BASTION_TLS_KEY`. The built-in Docker health check expects admin port 9090.
+Important environment variables: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_ORIGIN`, `BASTION_ADMIN_SECURE_COOKIE`, `BASTION_ALLOW_PRIVATE_UPSTREAMS`, `BASTION_METRICS_TOKEN`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_ACME_DNS_PROVIDER`, `BASTION_ACME_DNS_API_TOKEN`, `BASTION_ACME_DOMAINS`, `BASTION_ACME_DIRECTORY`, `BASTION_TLS_CERT`, and `BASTION_TLS_KEY`. The built-in Docker health check expects admin port 9090.
 
 For SSRF protection, private, loopback, link-local, and unspecified upstream destinations are rejected by default, including during connection establishment. If the WAF intentionally proxies trusted internal services, set `BASTION_ALLOW_PRIVATE_UPSTREAMS=true` and restrict the host/container network accordingly. The dashboard also supports a persistent light/dark theme toggle and follows the system preference on first use.
 
