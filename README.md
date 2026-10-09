@@ -86,6 +86,17 @@ In blocking mode, the second request should return 403 and the UI should show th
 
 **Let's Encrypt:** Set a real `BASTION_ACME_EMAIL` in `.env` and run `docker compose up -d`. ACME and HTTP-to-HTTPS redirects are then enabled. Domain DNS and ports 80/443 must point to this LXC from the Internet. Certificates are requested only for enabled hosts and cached/renewed under `/data/acme`. Unknown hosts receive no certificates.
 
+**Wildcard certificates with Cloudflare DNS-01:** Set a scoped Cloudflare API token with `Zone:DNS:Edit` for the relevant zone, then explicitly list the certificate names. This mode supports names such as `example.com,*.example.com` and does not require inbound port 80 for ACME validation:
+
+```dotenv
+BASTION_ACME_EMAIL=admin@example.com
+BASTION_ACME_DNS_PROVIDER=cloudflare
+BASTION_ACME_DNS_API_TOKEN=...
+BASTION_ACME_DOMAINS=example.com,*.example.com
+```
+
+The account key and certificate are stored under `/data/acme-dns` and renewed automatically. Use a least-privilege token, never commit it to Git, and use `BASTION_ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory` for safe testing. DNS propagation can delay the first issuance; startup waits for issuance so the TLS listener does not serve without a valid certificate.
+
 **Custom certificates:** Put `fullchain.pem` and `privkey.pem` in `certs/`, make them readable by UID 10001, and set:
 
 ```dotenv
@@ -106,7 +117,7 @@ Restart the container. The certificate must cover every domain in use. Manual ce
 - **Backends:** no active health checks, automatic retries, session affinity, or URL rewrites. “Active” in the UI means configured, not healthy. Private HTTP(S) backends are intentionally allowed; only trusted administrators should configure routes. Bastion is not a forward proxy.
 - **Accounts:** one administrator; no roles, SSO, or MFA. Admin APIs and backend access are highly privileged.
 - **Logs:** query strings, bodies, authorization headers, and Coraza match data are not retained. Paths may still contain application-sensitive values. The audit file is limited to 10 MiB plus one rotation.
-- **Not included:** GeoIP/ASN rules, bot challenges/CAPTCHA, API-schema validation, automatic tuning, threat-intelligence feeds, caching, HTTP/3, DNS-01 certificates, and GUI certificate management.
+- **Not included:** GeoIP/ASN rules, bot challenges/CAPTCHA, API-schema validation, automatic tuning, threat-intelligence feeds, caching, HTTP/3, and GUI certificate management.
 
 ## Monitoring and backup
 
@@ -133,7 +144,7 @@ go build ./cmd/bastion
 
 For local development, use `BASTION_ADMIN_PASSWORD` or `BASTION_ADMIN_PASSWORD_FILE`. Defaults: proxy `:8080`, admin `127.0.0.1:9090`, data `./data`.
 
-Important environment variables: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_ORIGIN`, `BASTION_ADMIN_SECURE_COOKIE`, `BASTION_ALLOW_PRIVATE_UPSTREAMS`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_TLS_CERT`, and `BASTION_TLS_KEY`. The built-in Docker health check expects admin port 9090.
+Important environment variables: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_ORIGIN`, `BASTION_ADMIN_SECURE_COOKIE`, `BASTION_ALLOW_PRIVATE_UPSTREAMS`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_ACME_DNS_PROVIDER`, `BASTION_ACME_DNS_API_TOKEN`, `BASTION_ACME_DOMAINS`, `BASTION_ACME_DIRECTORY`, `BASTION_TLS_CERT`, and `BASTION_TLS_KEY`. The built-in Docker health check expects admin port 9090.
 
 For SSRF protection, private, loopback, link-local, and unspecified upstream destinations are rejected by default, including during connection establishment. If the WAF intentionally proxies trusted internal services, set `BASTION_ALLOW_PRIVATE_UPSTREAMS=true` and restrict the host/container network accordingly. The dashboard also supports a persistent light/dark theme toggle and follows the system preference on first use.
 
