@@ -343,6 +343,17 @@ func TestRoutePolicyValidation(t *testing.T) {
 		t.Fatal("invalid bot pattern accepted")
 	}
 }
+func TestOWASPTop10RuleCategoryValidation(t *testing.T) {
+	c := DefaultConfig()
+	c.Rules = []Rule{{ID: "injection", Name: "Injection filter", Category: "A05", Field: "query", Value: "union select", Action: "block", Enabled: true}}
+	if err := validate(c, true); err != nil {
+		t.Fatalf("valid OWASP category rejected: %v", err)
+	}
+	c.Rules[0].Category = "A11"
+	if err := validate(c, true); err == nil {
+		t.Fatal("unknown OWASP category accepted")
+	}
+}
 func TestConfigValidationAndPersistence(t *testing.T) {
 	dir := t.TempDir()
 	a, e := New(dir, testPassword)

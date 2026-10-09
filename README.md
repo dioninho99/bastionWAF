@@ -22,6 +22,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - SQLi, XSS, traversal, command injection, and other CRS categories, including query, header, JSON, form, and multipart inspection.
 - Blocking/Detection Only, paranoia levels 1–4, anomaly threshold, and targeted CRS exclusions per route.
 - Custom path, query-string, header, body, User-Agent, and method rules using bounded literal case-insensitive substrings; rules can block or log before forwarding. OWASP CRS remains the primary SQL injection, XSS, traversal, and command-injection detector.
+- Custom rules can be tagged with an OWASP Top 10:2025 category (A01–A10). The WAF protection page shows a configuration coverage view for access control, misconfiguration, supply-chain, cryptography, injection, design, authentication, integrity, logging, and exceptional-condition controls. This is an operational mapping, not a certification.
 - IPv4/IPv6 CIDR deny list and optional allow list. Deny rules take precedence; allowed clients still pass through the WAF.
 - Fixed-window per-IP/per-route rate limiting, body limits, timeouts, connection limits, and bounded inspection buffers.
 - Each route may override WAF mode, paranoia, anomaly threshold, rate/body limits, allowed methods, and denied bot user-agent patterns. Empty/zero overrides inherit the global setting.
