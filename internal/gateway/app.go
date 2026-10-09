@@ -152,11 +152,13 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 			u, _ := url.Parse(raw)
 			rt.targets = append(rt.targets, u)
 		}
-		exclusions := fmt.Sprintf("%s|%d|%d|%d", mode, paranoia, threshold, maxBodyBytes)
+		cacheKey := fmt.Sprintf("%s|%d|%d|%d|%t", mode, paranoia, threshold, maxBodyBytes, c.ResponseInspection)
+		exclusions := ""
 		for _, id := range r.ExcludedRuleIDs {
 			exclusions += fmt.Sprintf("SecRuleRemoveById %d\n", id)
 		}
-		waf, ok := engines[exclusions]
+		cacheKey += "|" + exclusions
+		waf, ok := engines[cacheKey]
 		if !ok {
 			engine := "On"
 			if mode == "detection" {
@@ -172,7 +174,7 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 			if err != nil {
 				return nil, fmt.Errorf("WAF configuration: %w", err)
 			}
-			engines[exclusions] = waf
+			engines[cacheKey] = waf
 		}
 		rt.waf = waf
 		s.routes = append(s.routes, rt)
