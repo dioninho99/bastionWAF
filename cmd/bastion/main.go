@@ -66,10 +66,10 @@ func run() error {
 	cert, key := os.Getenv("BASTION_TLS_CERT"), os.Getenv("BASTION_TLS_KEY")
 	email := os.Getenv("BASTION_ACME_EMAIL")
 	if (cert == "") != (key == "") {
-		return errors.New("TLS_CERT und TLS_KEY müssen gemeinsam gesetzt werden")
+		return errors.New("TLS_CERT and TLS_KEY must be set together")
 	}
 	if cert != "" && email != "" {
-		return errors.New("Entweder manuelle TLS-Zertifikate oder ACME wählen")
+		return errors.New("choose either manual TLS certificates or ACME")
 	}
 	tlsEnabled := cert != "" || email != ""
 	httpHandler := http.Handler(app)

@@ -80,12 +80,12 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case a.slots <- struct{}{}:
 		defer func() { <-a.slots }()
 	default:
-		block(503, "Kapazitätslimit")
+		block(503, "capacity limit reached")
 		return
 	}
 	// Absolute-form requests and CONNECT are never accepted: this is not a forward proxy.
 	if r.URL.IsAbs() || r.Method == http.MethodConnect {
-		block(400, "Ungültige Proxy-Anfrage")
+		block(400, "invalid proxy request")
 		return
 	}
 	var route *routeRuntime
@@ -96,21 +96,21 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if route == nil {
-		block(404, "Keine passende Route")
+		block(404, "no matching route")
 		return
 	}
 	ev.Route = route.config.Name
 	ip, err := netip.ParseAddr(ev.Client)
 	if err != nil {
-		block(400, "Ungültige Client-IP")
+		block(400, "invalid client IP")
 		return
 	}
 	if inCIDRs(ip, c.DenyCIDRs) {
-		block(403, "IP-Sperrliste")
+		block(403, "IP deny list")
 		return
 	}
 	if len(c.AllowCIDRs) > 0 && !inCIDRs(ip, c.AllowCIDRs) {
-		block(403, "IP außerhalb der Zugriffsliste")
+		block(403, "IP is outside the allow list")
 		return
 	}
 	if !a.requestLimit.allow(route.config.ID+":"+ev.Client, c.RateLimit) {
@@ -119,19 +119,19 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.ContentLength > c.MaxBodyBytes {
-		block(413, "Request-Body zu groß")
+		block(413, "request body is too large")
 		return
 	}
 	// Reserve conservatively for Go's growing read buffer, Coraza's copy, and response buffering.
 	// This bounds payload allocations even when an admin raises the per-request body limit.
 	reservation := c.MaxBodyBytes*4 + (4 << 20)
 	if !a.bodyMemory.TryAcquire(reservation) {
-		block(503, "Prüfspeicher ausgelastet")
+		block(503, "inspection memory is exhausted")
 		return
 	}
 	defer a.bodyMemory.Release(reservation)
 	if enc := r.Header.Get("Content-Encoding"); enc != "" && !strings.EqualFold(enc, "identity") {
-		block(415, "Komprimierte Request-Bodies nicht unterstützt")
+		block(415, "compressed request bodies are not supported")
 		return
 	}
 	for _, rule := range c.Rules {
@@ -146,7 +146,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			value = r.Method
 		}
 		if strings.Contains(strings.ToLower(value), strings.ToLower(rule.Value)) {
-			ev.Reason = "Eigene Regel: " + rule.Name
+			ev.Reason = "custom rule: " + rule.Name
 			if rule.Action == "block" && c.Mode == "blocking" {
 				block(403, ev.Reason)
 				return
@@ -170,7 +170,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(ev.RuleIDs) > 0 && ev.Action == "allowed" {
 			ev.Action = "detected"
-			ev.Reason = "OWASP CRS-Treffer"
+			ev.Reason = "OWASP CRS match"
 		}
 	}()
 	host, port, _ := net.SplitHostPort(r.RemoteAddr)
@@ -203,17 +203,17 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, c.MaxBodyBytes+1))
 	if err != nil {
-		block(400, "Request-Body konnte nicht gelesen werden")
+		block(400, "request body could not be read")
 		return
 	}
 	if int64(len(body)) > c.MaxBodyBytes {
-		block(413, "Request-Body zu groß")
+		block(413, "request body is too large")
 		return
 	}
 	if len(body) > 0 {
 		it, _, e := tx.WriteRequestBody(body)
 		if e != nil {
-			block(400, "WAF konnte Request-Body nicht prüfen")
+			block(400, "WAF could not inspect request body")
 			return
 		}
 		if interrupted(it) {
@@ -222,7 +222,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	it, err := tx.ProcessRequestBody()
 	if err != nil {
-		block(400, "Ungültiger Request-Body")
+		block(400, "invalid request body")
 		return
 	}
 	if interrupted(it) {
@@ -268,7 +268,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return nil
 				}
 				ev.Action = "blocked"
-				ev.Reason = "OWASP Response-Regel"
+				ev.Reason = "OWASP response rule"
 				return errResponseBlocked
 			}
 			if err := reject(tx.ProcessResponseHeaders(resp.StatusCode, resp.Proto)); err != nil {
@@ -319,7 +319,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				ev.Status = 403
 			} else {
 				ev.Action = "error"
-				ev.Reason = "Upstream nicht erreichbar oder Antwort nicht prüfbar"
+				ev.Reason = "upstream unreachable or response cannot be inspected"
 			}
 			deny(w, ev.Status, ev.ID)
 		},

@@ -1,30 +1,30 @@
-# Validierung · 9. Oktober 2026
+# Validation · October 9, 2026
 
-## Ausgeführt
+## Executed
 
-- `go vet ./...` – erfolgreich.
-- `go test -race -count=1 ./...` – erfolgreich; neun Testgruppen und elf Untertests.
-- `node --check web/static/app.js` – erfolgreich.
-- `docker compose config --quiet` – erfolgreich.
-- Docker-Multistage-Build – erfolgreich; finales `scratch`-Image ca. 24 MB.
-- Laufzeit im finalen Image: UID/GID 10001, read-only Root-Dateisystem, alle Linux-Capabilities entfernt.
-- Frisches Named Volume: Login, Konfigurationsspeicherung und authentifizierte Prometheus-Metriken erfolgreich.
-- Neustart mit demselben Volume: Konfigurationsrevision und Einstellung erhalten; neue Anmeldung erfolgreich.
-- Live-Proxy-Test: zwölf legitime Requests mit 200 weitergeleitet, drei Angriffe mit 403 blockiert; Ereignisse korrekt als erlaubt/blockiert klassifiziert.
-- Browser: Anmeldung, Proxy-Host anlegen, eigene Regel erstellen, Schutzeinstellungen speichern, Ereignisfilter und Dashboard mit realen Requests geprüft. Keine Console-Warnungen/-Fehler in der finalen Ansicht.
+- `go vet ./...` – passed.
+- `go test -race -count=1 ./...` – passed; nine test groups and eleven subtests.
+- `node --check web/static/app.js` – passed.
+- `docker compose config --quiet` – passed.
+- Docker multi-stage build – passed; final `scratch` image is approximately 24 MiB.
+- Final image runtime: UID/GID 10001, read-only root filesystem, and all Linux capabilities removed.
+- Fresh named volume: login, configuration persistence, and authenticated Prometheus metrics passed.
+- Restart with the same volume: configuration revision and settings persisted; a new login passed.
+- Live proxy test: twelve legitimate requests forwarded with 200, three attacks blocked with 403; events were classified correctly.
+- Browser: login, proxy host creation, custom rule creation, protection settings, event filtering, and dashboard activity with real requests were verified. No console warnings or errors appeared in the final view.
 
-![Dashboard nach dem Live-Test](dashboard.jpg)
+![Dashboard after the live test](dashboard.jpg)
 
-## Abgedeckte Regressionen
+## Regression coverage
 
-SQL Injection, XSS, Path Traversal, JSON-/Form-Bodies, unveränderte Body-Weiterleitung, Detection Only, unbekannte Hosts, gefälschte Forwarding-Header, Log-Redaktion, eigene Regeln, Content-Length-/Chunked-Body-Limits, CIDR-Sperr-/Zugriffslisten, Rate Limit, Pfadgrenzen, Round Robin, deaktivierte Routen, Konfigurationsvalidierung/-persistenz, Revisionskonflikte, Passwort-Login, CSRF, Origin-Prüfung, Logout, Antwortgrößenlimit, CRS-Antwortblockierung, ungültige Backend-TLS-Zertifikate, WebSocket-Handshake/Tunnel, fehlerhaftes JSON, komprimierte Request-Bodies, Absolute-Form-Requests und parallele Requests während eines Konfigurationswechsels.
+SQL injection, XSS, path traversal, JSON/form bodies, unchanged body forwarding, Detection Only mode, unknown hosts, forged forwarding headers, log redaction, custom rules, Content-Length/chunked body limits, CIDR deny/allow lists, rate limiting, path boundaries, round robin, disabled routes, configuration validation/persistence, revision conflicts, password login, CSRF, Origin checks, logout, response size limits, CRS response blocking, invalid backend TLS certificates, WebSocket handshake/tunnel, malformed JSON, compressed request bodies, absolute-form requests, and concurrent requests during configuration changes.
 
-## Testumgebung und offene Validierung
+## Test environment and open validation
 
-Getestet auf Linux/amd64 in Docker Desktop. Der offizielle Go-Image-Download wurde in der lokalen Netzwerkumgebung mit HTTP 403 abgewiesen. Stattdessen wurde Go 1.26.8 aus dem offiziellen Alpine-Paketrepository in einem separaten Buildcontainer installiert; das bereits auf dem Windows-Host vertrauenswürdige öffentliche Firmen-Proxy-CA-Zertifikat wurde für die TLS-Prüfung übernommen. Die CRS-Pakete wurden wegen eines Modulproxy-Downloadfehlers direkt aus den offiziellen Git-Repositories aufgelöst. `go.sum` ist vorhanden.
+Tested on Linux/amd64 in Docker Desktop. The official Go image download was rejected with HTTP 403 in the local network environment. Go 1.26.8 was installed from the official Alpine package repository in a separate build container; the public corporate proxy CA already trusted by the Windows host was added for TLS verification. CRS packages were resolved directly from the official Git repositories after a module-proxy download failure. `go.sum` is present.
 
-Das Dockerfile wurde mit `--build-arg BUILDER_IMAGE=bastionwaf-build-tools:local` getestet; der Standard-Builder bleibt `golang:1.26-alpine`. Das lokale Testimage enthält deshalb auch die öffentliche Firmen-Proxy-CA im CA-Bundle. Für Deployment außerhalb dieser Umgebung regulär mit dem Standard-Builder neu bauen.
+The Dockerfile was tested with `--build-arg BUILDER_IMAGE=bastionwaf-build-tools:local`; the default builder remains `golang:1.26-alpine`. The local test image therefore also contains the public corporate proxy CA. For deployment outside this environment, rebuild normally with the default builder.
 
-Nicht ausgeführt: Deployment in den tatsächlichen LXC, externe DNS-/Router-Konfiguration, öffentliche ACME-Zertifikatsausstellung, Lasttest mit Zielanwendungen, externer Penetrationstest. Der Source-Build und das Non-Root-Laufzeitimage wurden lokal validiert; das ersetzt diese Zielumgebungsprüfungen nicht.
+Not executed: deployment in the actual LXC, external DNS/router configuration, public ACME issuance, load testing with target applications, and external penetration testing. The source build and non-root runtime image were validated locally; this does not replace target-environment validation.
 
-Die lokale Vorschau auf `127.0.0.1:19090` ist eine separate Testinstanz. Demo-Route, Demo-Backend, Preview-Passwort und deren Daten liegen unter dem Git-ignorierten `.tools/` und sind nicht Teil des produktiven Compose-Deployments. Das Demo-Backend wurde nur für diesen Testprozess gestartet; nach einem manuellen Container-Neustart muss es mit `docker exec -d bastion-preview /preview/demo` erneut gestartet werden oder die Demo-Route entfernt werden.
+The local preview at `127.0.0.1:19090` is a separate test instance. Its demo route, demo backend, preview password, and data are under the Git-ignored `.tools/` directory and are not part of the production Compose deployment. The demo backend was started only for this test process; after a manual container restart, start it again with `docker exec -d bastion-preview /preview/demo` or remove the demo route.

@@ -1,41 +1,41 @@
 # Bastion WAF
 
-Ein integriertes HTTP-Gateway für einen **separaten Linux-LXC mit Docker**. Reverse Proxy, Coraza-WAF, OWASP Core Rule Set und deutsche Verwaltungsoberfläche laufen in **einem Prozess und einem Container**. Ein zusätzlicher Nginx oder Traefik ist nicht erforderlich.
+An integrated HTTP gateway for a **separate Linux LXC running Docker**. The reverse proxy, Coraza WAF, OWASP Core Rule Set, and English administration UI run in **one process and one container**. No additional Nginx or Traefik instance is required.
 
 ```text
-Internet / Clients → LXC :80 / :443 → Bastion → HTTP(S)-Anwendungen im internen Netz
-Administrator → SSH-Tunnel / Management-Netz → LXC :9090 → Bastion Admin
+Internet / clients → LXC :80 / :443 → Bastion → HTTP(S) applications on the internal network
+Administrator → SSH tunnel / management network → LXC :9090 → Bastion Admin
 ```
 
-## Stand
+## Status
 
-Erste funktionsfähige Ausbaustufe, kein Versprechen vollständiger Enterprise-WAF-Parität. Die Implementierung verwendet echte Coraza-Transaktionen mit OWASP CRS, keine selbstgeschriebenen Regex-Listen als Ersatz. Integrationstests prüfen Blockierung **vor** Backend-Zugriff, Body-Weiterleitung, Antwortprüfung, TLS-Verifikation, WebSockets, Zugriffskontrolle, Authentifizierung und Konfigurationswechsel. Vor dem produktiven Einsatz Regeln mit den eigenen Anwendungen abstimmen und Last-/Sicherheitstests in der Zielumgebung durchführen.
+This is the first functional release, not a promise of complete enterprise-WAF parity. It uses real Coraza transactions with OWASP CRS rather than handwritten regex lists. Integration tests cover blocking before backend access, body forwarding, response inspection, TLS verification, WebSockets, access control, authentication, and configuration changes. Tune the rules for your applications and perform load and security testing in the target environment before production use.
 
-## Enthalten
+## Included
 
-- Deutsche, responsive GUI: Dashboard, Hosts, WAF-Einstellungen, eigene Regeln, Ereignisse und Konfigurationsexport/-import.
-- Exaktes Host-Routing und längster passender Pfad-Präfix mit Pfadsegment-Grenzen; Route deaktivieren und löschen.
-- HTTP-/HTTPS-Upstreams mit Zertifikatsprüfung, wahlweise Original-Host, Round-Robin über bis zu 16 Backends pro Route.
-- WebSocket-Upgrades; der HTTP-Handshake wird geprüft, Frames nach dem Upgrade werden durchgereicht.
-- TLS 1.2+, manuelle PEM-Zertifikate oder automatische Let's-Encrypt-Zertifikate für aktivierte Hosts.
-- Coraza **3.8.1**, CRS-Paket **4.25.0** (Versionen im `go.mod`/`go.sum` fixiert).
-- SQLi, XSS, Traversal, Command-Injection und weitere CRS-Kategorien; Query-, Header-, JSON-, Form- und Multipart-Prüfung gemäß CRS/Coraza-Konfiguration.
-- Blocking/Detection Only, Paranoia Level 1–4, Anomalie-Schwellenwert und gezielte CRS-Ausnahmen pro Route.
-- Eigene Regeln für Pfad, User-Agent und Methode; wörtliche, case-insensitive Teilstrings; blockieren oder protokollieren.
-- IPv4-/IPv6-CIDR-Sperrliste und optionale Zugriffsliste. Sperren haben Vorrang; erlaubte Clients umgehen die WAF nicht.
-- Fixed-Window-Rate-Limit pro IP und Route, Body-Limits, Timeouts, Connection-Limits und begrenzte Prüfpuffer.
-- Optionale Antwortprüfung für von Coraza unterstützte MIME-Typen, vor der Übertragung an den Client.
-- Ereignisse mit Request-ID, CRS-IDs, IP, Host, Pfad, Status und Dauer; JSON-Export und rotierende JSONL-Dateien.
-- Passwort-Login, HttpOnly-/SameSite-Cookies, CSRF- und Origin-Prüfung, Login-Limit und geschützte Prometheus-Metriken.
-- Atomare Konfigurationsspeicherung und Aktivierung ohne Neustart; Revisionen verhindern konkurrierendes Überschreiben.
+- Responsive English GUI: dashboard, proxy hosts, WAF protection, custom rules, events, and configuration export/import.
+- Exact host routing and longest matching path prefix with path-segment boundaries; routes can be disabled or deleted.
+- HTTP/HTTPS upstreams with certificate verification, optional original Host header, and round-robin balancing across up to 16 backends per route.
+- WebSocket upgrades; the HTTP handshake is inspected and frames are passed through after the upgrade.
+- TLS 1.2+, manual PEM certificates, or automatic Let's Encrypt certificates for enabled hosts.
+- Coraza **3.8.1** and CRS package **4.25.0**, pinned in `go.mod`/`go.sum`.
+- SQLi, XSS, traversal, command injection, and other CRS categories, including query, header, JSON, form, and multipart inspection.
+- Blocking/Detection Only, paranoia levels 1–4, anomaly threshold, and targeted CRS exclusions per route.
+- Custom path, User-Agent, and method rules using literal case-insensitive substrings; rules can block or log.
+- IPv4/IPv6 CIDR deny list and optional allow list. Deny rules take precedence; allowed clients still pass through the WAF.
+- Fixed-window per-IP/per-route rate limiting, body limits, timeouts, connection limits, and bounded inspection buffers.
+- Optional response inspection for MIME types supported by Coraza before data is sent to the client.
+- Events with request ID, CRS IDs, IP, host, path, status, and duration; JSON export and rotating JSONL files.
+- Password login, HttpOnly/SameSite cookies, CSRF and Origin checks, login limiting, and protected Prometheus metrics.
+- Atomic configuration persistence and activation without restart; revisions prevent concurrent overwrites.
 
-## Start im LXC
+## Start in the LXC
 
-Voraussetzung: Linux-LXC mit funktionierendem Docker Engine und Compose v2. Der LXC benötigt Netzwerkzugriff auf die Backends und auf öffentliche Registries/Go-Module beim Build. Für Docker im LXC muss der Virtualisierungshost die nötige Container-Unterstützung bereitstellen. Keine pauschale Deaktivierung von AppArmor oder Firewall notwendig; hostabhängige LXC-Einstellungen mit dem Betreiber klären.
+Prerequisite: a Linux LXC with a working Docker Engine and Compose v2. The LXC needs network access to backends and public registries/Go modules during the build. Docker inside the LXC requires the virtualization host to provide the required container support. Review host-specific LXC settings with the operator; blanket AppArmor or firewall disabling is not required.
 
-Als Startpunkt: 2 vCPU, 2 GiB RAM für den LXC, zusätzliche Reserve beim Build. Compose begrenzt den Dienst auf 1 GiB RAM und 2 CPUs; tatsächliche Kapazität mit den eigenen Requests messen.
+As a starting point, use 2 vCPUs and 2 GiB RAM for the LXC, with extra build capacity. Compose limits the service to 1 GiB RAM and 2 CPUs; measure actual capacity with your own traffic.
 
-Im geklonten Projekt:
+In the cloned project:
 
 ```sh
 mkdir -p secrets certs
@@ -49,42 +49,42 @@ docker compose up -d --build
 docker compose ps
 ```
 
-Das Secret ist das GUI-Passwort. Es wird nicht ins Image oder in `config.json` geschrieben. Mindestens 20 Zeichen sind erforderlich. Kein Standardpasswort vorhanden. Die Secret-Datei muss für UID 10001 im Container lesbar sein; die Befehle oben setzen dazu Eigentümer und Leserechte.
+The secret is the GUI password. It is not written into the image or `config.json`. At least 20 characters are required; no default password exists. The secret file must be readable by UID 10001 inside the container.
 
-Das Datenvolume wird beim ersten Start mit Eigentümer UID 10001 aus dem Image initialisiert. Die Konfiguration bleibt über Container-Neustarts erhalten.
+The data volume is initialized with UID 10001 on first start and persists across container restarts.
 
-### Admin-Zugang
+### Admin access
 
-Standardmäßig bindet der veröffentlichte Admin-Port ausschließlich an **127.0.0.1 im LXC**. Vom eigenen Rechner:
+By default, the published admin port binds only to **127.0.0.1 inside the LXC**. From your workstation:
 
 ```sh
-ssh -L 9090:127.0.0.1:9090 dein-user@LXC-IP
+ssh -L 9090:127.0.0.1:9090 your-user@LXC-IP
 ```
 
-Dann [http://localhost:9090](http://localhost:9090) öffnen und mit dem Secret anmelden. Der Tunnel verschlüsselt den Transport. Für direkten Zugriff im Management-Netz kann `BASTION_ADMIN_BIND` auf die interne LXC-IP gesetzt werden; der Admin-Listener selbst bietet in dieser Version nur HTTP. Deshalb SSH-/VPN-Zugang verwenden und Port 9090 nicht ins Internet weiterleiten. Er ist **kein** Pfad am öffentlichen Proxy-Listener.
+Open [http://localhost:9090](http://localhost:9090) and sign in with the secret. The tunnel encrypts transport. For direct management-network access, set `BASTION_ADMIN_BIND` to the internal LXC address. The admin listener is HTTP-only in this release, so use SSH/VPN access and never expose port 9090 to the Internet. It is **not** a path on the public proxy listener.
 
-### Erste Anwendung
+### First application
 
-1. Unter **Proxy Hosts → Proxy Host hinzufügen** einen Namen eintragen.
-2. Domain, z. B. `cloud.example.com`, und Pfad `/` angeben.
-3. Backend, z. B. `http://10.20.0.15:8080`, eintragen. `localhost` bezeichnet den Bastion-Container, nicht einen anderen LXC.
-4. Route aktivieren und speichern.
-5. DNS der Domain auf das Gateway zeigen lassen; im Router ausschließlich Ports 80/443 zum LXC weiterleiten.
+1. Open **Proxy Hosts → Add proxy host** and enter a name.
+2. Enter a domain such as `cloud.example.com` and path `/`.
+3. Enter a backend such as `http://10.20.0.15:8080`. `localhost` means the Bastion container, not another LXC.
+4. Enable and save the route.
+5. Point the domain DNS at the gateway and forward only ports 80/443 to the LXC.
 
-Test vor der DNS-Umstellung:
+Before changing DNS:
 
 ```sh
 curl -i -H 'Host: cloud.example.com' http://LXC-IP/
 curl -i -H 'Host: cloud.example.com' 'http://LXC-IP/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E'
 ```
 
-Im Blocking-Modus sollte die zweite Anfrage mit 403 enden. Die Oberfläche zeigt den Regeltreffer. Der Test muss gegen eine eigene, konfigurierte Anwendung erfolgen.
+In blocking mode, the second request should return 403 and the UI should show the rule match. Test only against an application you control.
 
-### HTTPS
+## HTTPS
 
-**Let's Encrypt:** In `.env` eine echte `BASTION_ACME_EMAIL` setzen und `docker compose up -d` ausführen. Dadurch werden ACME und die HTTP→HTTPS-Weiterleitung aktiviert. Mit Aktivierung werden die Let's-Encrypt-Nutzungsbedingungen akzeptiert. Domain-DNS, Port 80 und Port 443 müssen von außen auf diesen LXC zeigen. Zertifikate werden bei Bedarf ausschließlich für aktivierte Hosts angefordert und unter `/data/acme` erneuert/gecached. Unbekannte Hosts erhalten keine Zertifikate. ACME-Erteilung braucht eine echte Domain und wurde nicht durch die lokalen Tests validiert.
+**Let's Encrypt:** Set a real `BASTION_ACME_EMAIL` in `.env` and run `docker compose up -d`. ACME and HTTP-to-HTTPS redirects are then enabled. Domain DNS and ports 80/443 must point to this LXC from the Internet. Certificates are requested only for enabled hosts and cached/renewed under `/data/acme`. Unknown hosts receive no certificates.
 
-**Eigene Zertifikate:** `fullchain.pem` und `privkey.pem` nach `certs/` legen. Verzeichnis und Dateien müssen für UID 10001 zugänglich sein, z. B. mit `sudo chown 10001:10001 certs certs/fullchain.pem certs/privkey.pem`, Verzeichnismodus 700 und Dateimodus 400. In `.env`:
+**Custom certificates:** Put `fullchain.pem` and `privkey.pem` in `certs/`, make them readable by UID 10001, and set:
 
 ```dotenv
 BASTION_ACME_EMAIL=
@@ -92,35 +92,35 @@ BASTION_TLS_CERT=/certs/fullchain.pem
 BASTION_TLS_KEY=/certs/privkey.pem
 ```
 
-Container neu starten. Das Zertifikat muss alle verwendeten Domains abdecken. Manuelle Zertifikate benötigen nach Erneuerung einen Neustart. Ohne ACME/PEM bleibt der Proxy auf HTTP; der veröffentlichte 443-Port hat dann keinen Listener. HTTP-Redirects zielen auf den Standardport 443.
+Restart the container. The certificate must cover every domain in use. Manual certificates require a restart after renewal. Without ACME or PEM files, the proxy remains HTTP-only and the published 443 port has no listener.
 
-## Betriebsverhalten und Grenzen
+## Operating behavior and limits
 
-- **Single Instance:** Konfiguration auf lokalem Volume; Rate Limits, Sitzungen und Dashboard-Zähler im Arbeitsspeicher. Keine verteilten Limits oder HA-Synchronisierung. Sitzungen enden nach acht Stunden oder Neustart. Das JSONL-Archiv bleibt erhalten; die GUI zeigt nur bis zu 1.000 Ereignisse des aktuellen Prozesses.
-- **Direkter Edge-Betrieb:** Client-IP kommt vom TCP-Peer. Übermittelte `Forwarded`, `X-Forwarded-*` und `X-Real-IP` werden verworfen/neu aufgebaut. Keine Trusted-Proxy-/CDN-Unterstützung. Eine NAT-/Docker-Konfiguration, die die Client-IP maskiert, führt zu gemeinsamen IP-Limits; im LXC verifizieren.
-- **Uploads:** Standard 2 MiB pro Request, konfigurierbar 1 KiB–32 MiB. Vor Weiterleitung wird der komplette Request gepuffert. Komprimierte Request-Bodies werden mit 415 abgewiesen. Unvollständige Prüfung führt nicht zu ungeprüfter Weiterleitung.
-- **Antwortprüfung:** Standardmäßig aus, um Streaming/Downloads nicht unnötig zu puffern. Bei Aktivierung maximal 1 MiB für prüfbare MIME-Typen; größere oder komprimierte prüfbare Antworten werden mit 502 verworfen. Binärinhalte sind kein Malware-Scan. SSE-/Langzeit-Streaming wird durch den 60-Sekunden-Request-Timeout begrenzt. WebSocket-Frames und gRPC-Nachrichten werden nicht geprüft.
-- **Limits:** Maximal 128 parallele Proxy-Anfragen/Upgrades; konservatives 256-MiB-Reservierungsbudget für Payload-Puffer. Bei ausgeschöpfter Kapazität 503. Dies ist keine volumetrische DDoS-Abwehr und garantiert keine feste Gesamtspeichergrenze für die Engine.
-- **Backends:** Keine aktiven Healthchecks, automatischen Retries, Session-Affinität oder URL-Rewrites. „Aktiv“ in der GUI bedeutet konfiguriert, nicht gesund. Private HTTP(S)-Backends sind absichtlich erlaubt; nur vertrauenswürdige Administratoren dürfen Routen konfigurieren. Kein Forward Proxy.
-- **Accounts:** Ein Administrator, keine Rollen, SSO oder MFA. Die Admin-API und Backend-Zugriffe sind hoch privilegiert. Ein separates, nur lesendes Monitoring-Token ist noch nicht implementiert.
-- **Logs:** Keine Query-Strings, Bodies, Auth-Header oder Coraza-Match-Daten; Pfade können dennoch anwendungsspezifisch sensible Werte enthalten. Audit-Datei maximal 10 MiB plus eine Rotation. Config-Änderungen werden mit Revision und Client-IP auf stdout protokolliert; kein manipulationssicheres Audit-Archiv.
-- **Noch nicht enthalten:** GeoIP/ASN-Regeln, Bot-Challenges/CAPTCHA, API-Schema-Validierung, automatisches Tuning, Threat-Intel-Feeds, Cache, HTTP/3, DNS-01-Zertifikate und Zertifikatsverwaltung in der GUI.
+- **Single instance:** configuration is stored on a local volume; rate limits, sessions, and dashboard counters are in memory. There are no distributed limits or HA synchronization. Sessions expire after eight hours or restart. The JSONL archive persists; the UI shows at most 1,000 events from the current process.
+- **Direct edge operation:** client IP comes from the TCP peer. Forwarded, `X-Forwarded-*`, and `X-Real-IP` headers are discarded and rebuilt. There is no trusted-proxy/CDN support.
+- **Uploads:** default 2 MiB per request, configurable from 1 KiB to 32 MiB. The complete request is buffered before forwarding. Compressed request bodies are rejected with 415.
+- **Response inspection:** disabled by default. When enabled, inspectable MIME types are limited to 1 MiB; larger or compressed inspectable responses are rejected with 502. This is not malware scanning. WebSocket frames and gRPC messages are not inspected.
+- **Capacity:** at most 128 concurrent proxy requests/upgrades and a conservative 256 MiB payload-buffer reservation budget. Exhaustion returns 503. This is not volumetric DDoS protection.
+- **Backends:** no active health checks, automatic retries, session affinity, or URL rewrites. “Active” in the UI means configured, not healthy. Private HTTP(S) backends are intentionally allowed; only trusted administrators should configure routes. Bastion is not a forward proxy.
+- **Accounts:** one administrator; no roles, SSO, or MFA. Admin APIs and backend access are highly privileged.
+- **Logs:** query strings, bodies, authorization headers, and Coraza match data are not retained. Paths may still contain application-sensitive values. The audit file is limited to 10 MiB plus one rotation.
+- **Not included:** GeoIP/ASN rules, bot challenges/CAPTCHA, API-schema validation, automatic tuning, threat-intelligence feeds, caching, HTTP/3, DNS-01 certificates, and GUI certificate management.
 
-## Monitoring und Sicherung
+## Monitoring and backup
 
-Healthcheck: `GET /healthz` am Admin-Port, ohne Login. Prüft Prozess/Listener, keine Backend-Gesundheit.
+Health check: `GET /healthz` on the admin port, without login. It checks the process/listeners, not backend health.
 
-Prometheus: `GET /metrics`, Admin-Sitzung oder `Authorization: Bearer <Admin-Passwort>` erforderlich. Nur aus dem vertrauenswürdigen Management-Netz abfragen; das Passwort gewährt volle Admin-Rechte. Zähler haben keine hoch-kardinalen Host-/IP-Labels.
+Prometheus: `GET /metrics` with an admin session or `Authorization: Bearer <admin-password>`. Query it only from the trusted management network; the password grants full admin access.
 
 ```sh
 docker compose logs -f --tail=100 bastion
 ```
 
-Konfiguration im GUI exportieren; für vollständige Wiederherstellung zusätzlich das Volume `bastion_data` (Config, Logs, ACME-Keys), `secrets/`, `.env` und `certs/` geschützt sichern. Das Volume ist vor einem Image-Update zu sichern. **`docker compose down -v` löscht das Datenvolume.**
+Export configuration from the GUI. For a complete restore, also protect the `bastion_data` volume, `secrets/`, `.env`, and `certs/`. Back up the volume before image updates. **`docker compose down -v` deletes the data volume.**
 
-## Entwicklung und Tests
+## Development and tests
 
-Go 1.26 empfohlen, keine Node-/Frontend-Build-Abhängigkeiten. HTML/CSS/JS werden über `go:embed` in das Binary eingebettet.
+Go 1.26 is recommended; there are no Node/frontend build dependencies. HTML/CSS/JS are embedded into the binary with `go:embed`.
 
 ```sh
 go mod download
@@ -129,15 +129,15 @@ go vet ./...
 go build ./cmd/bastion
 ```
 
-Lokaler Start mit `BASTION_ADMIN_PASSWORD` (nur Entwicklung) oder `BASTION_ADMIN_PASSWORD_FILE`. Default: Proxy `:8080`, Admin `127.0.0.1:9090`, Daten `./data`.
+For local development, use `BASTION_ADMIN_PASSWORD` or `BASTION_ADMIN_PASSWORD_FILE`. Defaults: proxy `:8080`, admin `127.0.0.1:9090`, data `./data`.
 
-Wichtige Umgebungsvariablen: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_TLS_CERT`, `BASTION_TLS_KEY`. Der eingebaute Docker-Healthcheck erwartet den Admin-Port 9090.
+Important environment variables: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_TLS_CERT`, and `BASTION_TLS_KEY`. The built-in Docker health check expects admin port 9090.
 
 ```text
-cmd/bastion/         Einstieg, Listener, TLS/ACME, Shutdown
-internal/gateway/   Config, Coraza, Proxy, Admin-API, Ereignisse, Tests
-web/static/         GUI ohne externe CDN-Abhängigkeiten
-compose.yaml        LXC-/Docker-Deployment
+cmd/bastion/        entrypoint, listeners, TLS/ACME, shutdown
+internal/gateway/   config, Coraza, proxy, admin API, events, tests
+web/static/         GUI without external CDN dependencies
+compose.yaml        LXC/Docker deployment
 ```
 
-Referenzen: [Coraza](https://coraza.io/docs/), [OWASP CRS](https://coreruleset.org/docs/), [Go ReverseProxy](https://pkg.go.dev/net/http/httputil#ReverseProxy), [autocert](https://pkg.go.dev/golang.org/x/crypto/acme/autocert).
+References: [Coraza](https://coraza.io/docs/), [OWASP CRS](https://coreruleset.org/docs/), [Go ReverseProxy](https://pkg.go.dev/net/http/httputil#ReverseProxy), [autocert](https://pkg.go.dev/golang.org/x/crypto/acme/autocert).

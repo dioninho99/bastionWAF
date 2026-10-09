@@ -45,7 +45,7 @@ type App struct {
 
 func New(dir, password string) (*App, error) {
 	if len(password) < 20 {
-		return nil, errors.New("BASTION_ADMIN_PASSWORD muss mindestens 20 Zeichen lang sein")
+		return nil, errors.New("BASTION_ADMIN_PASSWORD must be at least 20 characters long")
 	}
 	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128)}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)
@@ -116,7 +116,7 @@ func compile(c Config) (*snapshot, error) {
 			var err error
 			waf, err = coraza.NewWAF(coraza.NewWAFConfig().WithRootFS(crs.FS).WithDirectivesFromFile("@coraza.conf-recommended").WithDirectivesFromFile("@crs-setup.conf.example").WithDirectives(setup).WithDirectivesFromFile("@owasp_crs/*.conf").WithDirectives(exclusions))
 			if err != nil {
-				return nil, fmt.Errorf("WAF-Konfiguration: %w", err)
+				return nil, fmt.Errorf("WAF configuration: %w", err)
 			}
 			engines[exclusions] = waf
 		}
@@ -145,4 +145,4 @@ func (a *App) Update(c Config, revision int64) error {
 	return nil
 }
 
-var errConflict = errors.New("Konfiguration wurde zwischenzeitlich geändert; bitte neu laden")
+var errConflict = errors.New("configuration changed meanwhile; please reload")
