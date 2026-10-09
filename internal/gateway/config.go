@@ -42,10 +42,14 @@ type Route struct {
 	MaxBodyBytes    int64    `json:"maxBodyBytes,omitempty"`
 	AllowedMethods  []string `json:"allowedMethods,omitempty"`
 	BotDenyPatterns []string `json:"botDenyPatterns,omitempty"`
+	AllowedContentTypes []string `json:"allowedContentTypes,omitempty"`
+	RequireContentType bool `json:"requireContentType,omitempty"`
+	SecurityHeaders bool `json:"securityHeaders,omitempty"`
 }
 type Rule struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
+	Category string `json:"category,omitempty"`
 	Field   string `json:"field"`
 	Value   string `json:"value"`
 	Action  string `json:"action"`
@@ -79,12 +83,16 @@ func normalize(c *Config) {
 		if c.Routes[i].BotDenyPatterns == nil {
 			c.Routes[i].BotDenyPatterns = []string{}
 		}
+		if c.Routes[i].AllowedContentTypes == nil {
+			c.Routes[i].AllowedContentTypes = []string{}
+		}
 	}
 }
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 var domainName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
 var httpMethod = regexp.MustCompile(`^[A-Z][A-Z0-9-]{0,19}$`)
+var owaspCategory = regexp.MustCompile(`^A(0[1-9]|10)$`)
 
 func validate(c Config, allowPrivate bool) error {
 	if c.Mode != "blocking" && c.Mode != "detection" {
@@ -179,6 +187,14 @@ func validate(c Config, allowPrivate bool) error {
 				return fmt.Errorf("invalid bot user-agent pattern: %w", err)
 			}
 		}
+		if len(r.AllowedContentTypes) > 16 {
+			return errors.New("a maximum of 16 allowed content types is supported per route")
+		}
+		for _, contentType := range r.AllowedContentTypes {
+			if len(contentType) < 3 || len(contentType) > 128 || strings.ContainsAny(contentType, "\r\n;") || !strings.Contains(contentType, "/") {
+				return errors.New("allowed content types must be media types such as application/json")
+			}
+		}
 	}
 	ids = map[string]bool{}
 	if len(c.Rules) > 64 {
@@ -190,6 +206,9 @@ func validate(c Config, allowPrivate bool) error {
 			return errors.New("custom rule is invalid or duplicated")
 		}
 		ids[r.ID] = true
+		if r.Category != "" && !owaspCategory.MatchString(r.Category) {
+			return errors.New("custom rule category must be an OWASP Top 10:2025 identifier such as A05")
+		}
 		switch r.Field {
 		case "path", "query", "header", "user-agent", "method", "body":
 			if r.Field == "body" {
