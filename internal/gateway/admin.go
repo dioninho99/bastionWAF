@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
@@ -153,6 +154,50 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 		stats["routes"] = len(a.state.Load().routes)
 		stats["engine"] = "Coraza + OWASP CRS"
 		jsonReply(w, 200, stats)
+	}))
+	mux.HandleFunc("GET /api/analytics", protected(func(w http.ResponseWriter, r *http.Request) {
+		stats := a.Events.stats()
+		jsonReply(w, 200, map[string]any{
+			"generatedAt": time.Now().UTC(),
+			"retention":   "last 1,000 events in memory; audit files rotate at 10 MiB",
+			"routes":      stats["routeCounts"],
+			"statuses":    stats["statusCounts"],
+			"clients":     stats["clientCounts"],
+			"series":      stats["series"],
+		})
+	}))
+	mux.HandleFunc("GET /api/upstreams", protected(func(w http.ResponseWriter, r *http.Request) {
+		type result struct {
+			Route   string `json:"route"`
+			Target  string `json:"target"`
+			Healthy bool   `json:"healthy"`
+			Status int    `json:"status,omitempty"`
+			Error   string `json:"error,omitempty"`
+		}
+		results := make([]result, 0)
+		for _, route := range a.state.Load().routes {
+			for _, target := range route.targets {
+				ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+				req, err := http.NewRequestWithContext(ctx, http.MethodHead, target.String(), nil)
+				if err != nil {
+					cancel()
+					results = append(results, result{Route: route.config.ID, Target: target.String(), Error: "invalid target"})
+					continue
+				}
+				resp, err := a.transport.RoundTrip(req)
+				cancel()
+				item := result{Route: route.config.ID, Target: target.String()}
+				if err != nil {
+					item.Error = "unreachable"
+				} else {
+					item.Status = resp.StatusCode
+					item.Healthy = resp.StatusCode < 500
+					resp.Body.Close()
+				}
+				results = append(results, item)
+			}
+		}
+		jsonReply(w, 200, results)
 	}))
 	mux.HandleFunc("GET /api/events", protected(func(w http.ResponseWriter, r *http.Request) {
 		events := a.Events.list()
