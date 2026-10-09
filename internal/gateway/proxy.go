@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"mime"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -140,6 +141,28 @@ methodAllowed:
 	if r.ContentLength > route.maxBodyBytes {
 		block(413, "request body is too large")
 		return
+	}
+	bodyMethod := r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch
+	if bodyMethod && (r.ContentLength != 0 || len(r.TransferEncoding) > 0 || r.Header.Get("Transfer-Encoding") != "") {
+		contentType := r.Header.Get("Content-Type")
+		mediaType, _, parseErr := mime.ParseMediaType(contentType)
+		if route.config.RequireContentType && parseErr != nil {
+			block(415, "a valid content type is required")
+			return
+		}
+		if len(route.config.AllowedContentTypes) > 0 {
+			allowed := false
+			for _, candidate := range route.config.AllowedContentTypes {
+				if strings.EqualFold(mediaType, candidate) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				block(415, "content type is not allowed for this route")
+				return
+			}
+		}
 	}
 	// Reserve conservatively for Go's growing read buffer, Coraza's copy, and response buffering.
 	// This bounds payload allocations even when an admin raises the per-request body limit.
@@ -338,6 +361,14 @@ methodAllowed:
 			resp.Header.Del("Server")
 			resp.Header.Set("X-Request-ID", ev.ID)
 			resp.Header.Set("X-Content-Type-Options", "nosniff")
+			if route.config.SecurityHeaders {
+				resp.Header.Set("Referrer-Policy", "no-referrer")
+				resp.Header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+				resp.Header.Set("Content-Security-Policy", "frame-ancestors 'none'")
+				if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+					resp.Header.Set("Strict-Transport-Security", "max-age=31536000")
+				}
+			}
 			ev.Status = resp.StatusCode
 			now := time.Now()
 			if upstreamFailureStatus(resp.StatusCode) {

@@ -227,6 +227,21 @@ func TestCustomRulesInspectQueryHeadersAndBody(t *testing.T) {
 		t.Fatal("custom request filters forwarded a blocked request")
 	}
 }
+func TestRouteOWASPContentAndSecurityPolicies(t *testing.T) {
+	a, _, _ := testApp(t)
+	change(t, a, func(c *Config) {
+		c.Routes[0].AllowedContentTypes = []string{"application/json"}
+		c.Routes[0].RequireContentType = true
+		c.Routes[0].SecurityHeaders = true
+	})
+	if w := request(a, "POST", "/", `{"ok":true}`, "text/plain"); w.Code != 415 {
+		t.Fatalf("content type policy: %d", w.Code)
+	}
+	w := request(a, "POST", "/", `{"ok":true}`, "application/json")
+	if w.Code != 200 || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Content-Security-Policy") != "frame-ancestors 'none'" {
+		t.Fatalf("security headers or accepted content type missing: status=%d headers=%v", w.Code, w.Header())
+	}
+}
 func TestRoutingAndRoundRobin(t *testing.T) {
 	a, first, _ := testApp(t)
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("second")) }))

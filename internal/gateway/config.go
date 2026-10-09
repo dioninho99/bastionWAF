@@ -42,6 +42,9 @@ type Route struct {
 	MaxBodyBytes    int64    `json:"maxBodyBytes,omitempty"`
 	AllowedMethods  []string `json:"allowedMethods,omitempty"`
 	BotDenyPatterns []string `json:"botDenyPatterns,omitempty"`
+	AllowedContentTypes []string `json:"allowedContentTypes,omitempty"`
+	RequireContentType bool `json:"requireContentType,omitempty"`
+	SecurityHeaders bool `json:"securityHeaders,omitempty"`
 }
 type Rule struct {
 	ID      string `json:"id"`
@@ -79,6 +82,9 @@ func normalize(c *Config) {
 		}
 		if c.Routes[i].BotDenyPatterns == nil {
 			c.Routes[i].BotDenyPatterns = []string{}
+		}
+		if c.Routes[i].AllowedContentTypes == nil {
+			c.Routes[i].AllowedContentTypes = []string{}
 		}
 	}
 }
@@ -179,6 +185,14 @@ func validate(c Config, allowPrivate bool) error {
 			}
 			if _, err := regexp.Compile("(?i:" + pattern + ")"); err != nil {
 				return fmt.Errorf("invalid bot user-agent pattern: %w", err)
+			}
+		}
+		if len(r.AllowedContentTypes) > 16 {
+			return errors.New("a maximum of 16 allowed content types is supported per route")
+		}
+		for _, contentType := range r.AllowedContentTypes {
+			if len(contentType) < 3 || len(contentType) > 128 || strings.ContainsAny(contentType, "\r\n;") || !strings.Contains(contentType, "/") {
+				return errors.New("allowed content types must be media types such as application/json")
 			}
 		}
 	}
