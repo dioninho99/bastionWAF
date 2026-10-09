@@ -1,0 +1,10 @@
+.tools/
+.cache/
+data/
+secrets/
+certs/
+.env
+bastionwaf
+bastionwaf.exe
+coverage.out
+*.test

@@ -1,0 +1,9 @@
+.git
+.tools
+.cache
+data
+secrets
+certs
+.env
+*.exe
+coverage.out
