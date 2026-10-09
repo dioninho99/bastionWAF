@@ -153,26 +153,6 @@ methodAllowed:
 		block(415, "compressed request bodies are not supported")
 		return
 	}
-	for _, rule := range c.Rules {
-		if !rule.Enabled {
-			continue
-		}
-		value := r.URL.Path
-		switch rule.Field {
-		case "user-agent":
-			value = r.UserAgent()
-		case "method":
-			value = r.Method
-		}
-		if strings.Contains(strings.ToLower(value), strings.ToLower(rule.Value)) {
-			ev.Reason = "custom rule: " + rule.Name
-			if rule.Action == "block" && route.mode == "blocking" {
-				block(403, ev.Reason)
-				return
-			}
-			ev.Action = "detected"
-		}
-	}
 	tx := route.waf.NewTransaction()
 	defer tx.Close()
 	defer func() {
@@ -228,6 +208,35 @@ methodAllowed:
 	if int64(len(body)) > route.maxBodyBytes {
 		block(413, "request body is too large")
 		return
+	}
+	headers := strings.Builder{}
+	for name, values := range r.Header {
+		headers.WriteString(name)
+		headers.WriteByte(':')
+		headers.WriteString(strings.Join(values, ","))
+		headers.WriteByte('\n')
+	}
+	customValues := map[string]string{
+		"path":       r.URL.Path,
+		"query":      r.URL.RawQuery,
+		"header":     headers.String(),
+		"user-agent": r.UserAgent(),
+		"method":     r.Method,
+		"body":       string(body),
+	}
+	for _, rule := range c.Rules {
+		if !rule.Enabled {
+			continue
+		}
+		value := customValues[rule.Field]
+		if strings.Contains(strings.ToLower(value), strings.ToLower(rule.Value)) {
+			ev.Reason = "custom rule: " + rule.Name
+			if rule.Action == "block" && route.mode == "blocking" {
+				block(403, ev.Reason)
+				return
+			}
+			ev.Action = "detected"
+		}
 	}
 	if len(body) > 0 {
 		it, _, e := tx.WriteRequestBody(body)

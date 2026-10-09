@@ -163,6 +163,7 @@ func TestLimitsAndCustomRules(t *testing.T) {
 	if w := request(a, "GET", "/private", "", ""); w.Code != 403 {
 		t.Fatal(w.Code)
 	}
+
 	if hits.Load() != before {
 		t.Fatal("custom block bypassed")
 	}
@@ -194,6 +195,36 @@ func TestLimitsAndCustomRules(t *testing.T) {
 	}
 	if w := request(a, "GET", "/", "", ""); w.Code != 429 {
 		t.Fatal(w.Code)
+	}
+}
+func TestCustomRulesInspectQueryHeadersAndBody(t *testing.T) {
+	a, _, hits := testApp(t)
+	change(t, a, func(c *Config) {
+		c.Rules = []Rule{
+			{ID: "query-filter", Name: "Suspicious query", Field: "query", Value: "union select", Action: "block", Enabled: true},
+			{ID: "header-filter", Name: "Suspicious header", Field: "header", Value: "x-attack-marker", Action: "block", Enabled: true},
+			{ID: "body-filter", Name: "Suspicious body", Field: "body", Value: "drop table", Action: "block", Enabled: true},
+		}
+	})
+	before := hits.Load()
+	if w := request(a, "GET", "/search?q=UNION%20SELECT", "", ""); w.Code != 403 {
+		t.Fatalf("query filter status = %d", w.Code)
+	}
+	headerRequest := httptest.NewRequest("GET", "http://app.example.com/", nil)
+	headerRequest.RemoteAddr = "192.0.2.20:45000"
+	headerRequest.URL.Scheme = ""
+	headerRequest.URL.Host = ""
+	headerRequest.Header.Set("X-Attack-Marker", "present")
+	headerResponse := httptest.NewRecorder()
+	a.ServeHTTP(headerResponse, headerRequest)
+	if headerResponse.Code != 403 {
+		t.Fatalf("header filter status = %d", headerResponse.Code)
+	}
+	if w := request(a, "POST", "/", "DROP TABLE users", "text/plain"); w.Code != 403 {
+		t.Fatalf("body filter status = %d", w.Code)
+	}
+	if hits.Load() != before {
+		t.Fatal("custom request filters forwarded a blocked request")
 	}
 }
 func TestRoutingAndRoundRobin(t *testing.T) {

@@ -21,7 +21,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - Coraza **3.8.1** and CRS package **4.25.0**, pinned in `go.mod`/`go.sum`.
 - SQLi, XSS, traversal, command injection, and other CRS categories, including query, header, JSON, form, and multipart inspection.
 - Blocking/Detection Only, paranoia levels 1–4, anomaly threshold, and targeted CRS exclusions per route.
-- Custom path, User-Agent, and method rules using literal case-insensitive substrings; rules can block or log.
+- Custom path, query-string, header, body, User-Agent, and method rules using bounded literal case-insensitive substrings; rules can block or log before forwarding. OWASP CRS remains the primary SQL injection, XSS, traversal, and command-injection detector.
 - IPv4/IPv6 CIDR deny list and optional allow list. Deny rules take precedence; allowed clients still pass through the WAF.
 - Fixed-window per-IP/per-route rate limiting, body limits, timeouts, connection limits, and bounded inspection buffers.
 - Each route may override WAF mode, paranoia, anomaly threshold, rate/body limits, allowed methods, and denied bot user-agent patterns. Empty/zero overrides inherit the global setting.
