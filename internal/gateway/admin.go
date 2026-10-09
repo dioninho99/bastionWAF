@@ -54,7 +54,11 @@ func (a *App) getSession(r *http.Request) (session, bool) {
 	}
 	return s, true
 }
-func (a *App) AdminHandler(assets http.Handler) http.Handler {
+func (a *App) AdminHandler(assets http.Handler, allowedOrigins ...string) http.Handler {
+	allowedOrigin := ""
+	if len(allowedOrigins) > 0 {
+		allowedOrigin = strings.TrimRight(strings.TrimSpace(allowedOrigins[0]), "/")
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonReply(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
@@ -202,7 +206,11 @@ func (a *App) AdminHandler(assets http.Handler) http.Handler {
 				if r.TLS != nil {
 					scheme = "https"
 				}
-				if e != nil || u.Host != r.Host || u.Scheme != scheme {
+				originAllowed := e == nil && u.Host == r.Host && u.Scheme == scheme
+				if allowedOrigin != "" && origin == allowedOrigin {
+					originAllowed = true
+				}
+				if !originAllowed {
 					apiError(w, 403, "origin not allowed")
 					return
 				}

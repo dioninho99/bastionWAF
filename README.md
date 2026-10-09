@@ -63,6 +63,8 @@ ssh -L 9090:127.0.0.1:9090 your-user@LXC-IP
 
 Open [http://localhost:9090](http://localhost:9090) and sign in with the secret. The tunnel encrypts transport. For direct management-network access, set `BASTION_ADMIN_BIND` to the internal LXC address. The admin listener is HTTP-only in this release, so use SSH/VPN access and never expose port 9090 to the Internet. It is **not** a path on the public proxy listener.
 
+To serve the admin UI through a TLS reverse proxy such as Zoraxy, publish the admin port on the LXC management interface, set `BASTION_ADMIN_ORIGIN` to the exact external origin (for example `https://admin.example.com`), and proxy that hostname to `http://LXC-IP:9090`. Keep the admin hostname restricted to the management network.
+
 ### First application
 
 1. Open **Proxy Hosts → Add proxy host** and enter a name.
@@ -131,7 +133,7 @@ go build ./cmd/bastion
 
 For local development, use `BASTION_ADMIN_PASSWORD` or `BASTION_ADMIN_PASSWORD_FILE`. Defaults: proxy `:8080`, admin `127.0.0.1:9090`, data `./data`.
 
-Important environment variables: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_TLS_CERT`, and `BASTION_TLS_KEY`. The built-in Docker health check expects admin port 9090.
+Important environment variables: `BASTION_DATA_DIR`, `BASTION_HTTP_ADDR`, `BASTION_HTTPS_ADDR`, `BASTION_ADMIN_ADDR`, `BASTION_ADMIN_ORIGIN`, `BASTION_ADMIN_PASSWORD_FILE`, `BASTION_ACME_EMAIL`, `BASTION_TLS_CERT`, and `BASTION_TLS_KEY`. The built-in Docker health check expects admin port 9090.
 
 ```text
 cmd/bastion/        entrypoint, listeners, TLS/ACME, shutdown

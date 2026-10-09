@@ -260,6 +260,7 @@ func TestConfigValidationAndPersistence(t *testing.T) {
 func TestAdminAuthCSRFAndConflict(t *testing.T) {
 	a, _, _ := testApp(t)
 	h := a.AdminHandler(http.NotFoundHandler())
+	proxied := a.AdminHandler(http.NotFoundHandler(), "https://admin.example.com")
 	req := func(method, path, body string, cookie *http.Cookie, csrf, origin, revision string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.RemoteAddr = "127.0.0.1:32100"
@@ -281,6 +282,13 @@ func TestAdminAuthCSRFAndConflict(t *testing.T) {
 	}
 	if w := req("POST", "/api/login", `{"password":"`+testPassword+`"}`, nil, "", "https://evil.example", ""); w.Code != 403 {
 		t.Fatal(w.Code)
+	}
+	proxiedReq := httptest.NewRequest("POST", "/api/login", `{"password":"`+testPassword+`"}`)
+	proxiedReq.Header.Set("Origin", "https://admin.example.com")
+	proxiedResp := httptest.NewRecorder()
+	proxied.ServeHTTP(proxiedResp, proxiedReq)
+	if proxiedResp.Code != 200 {
+		t.Fatalf("configured admin origin rejected: %d %s", proxiedResp.Code, proxiedResp.Body.String())
 	}
 	w := req("POST", "/api/login", `{"password":"`+testPassword+`"}`, nil, "", "", "")
 	if w.Code != 200 {
