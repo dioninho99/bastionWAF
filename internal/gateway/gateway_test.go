@@ -207,6 +207,7 @@ func TestRoutingAndRoundRobin(t *testing.T) {
 	if w := request(a, "GET", "/", "", ""); w.Body.String() != "upstream-ok" {
 		t.Fatal(w.Body.String())
 	}
+
 	if w := request(a, "GET", "/", "", ""); w.Body.String() != "second" {
 		t.Fatal(w.Body.String())
 	}
@@ -219,6 +220,78 @@ func TestRoutingAndRoundRobin(t *testing.T) {
 	change(t, a, func(c *Config) { c.Routes[0].Enabled = false })
 	if w := request(a, "GET", "/", "", ""); w.Code != 404 {
 		t.Fatal(w.Code)
+	}
+}
+func TestRouteSecurityPolicies(t *testing.T) {
+	a, _, hits := testApp(t)
+	change(t, a, func(c *Config) {
+		c.RateLimit = 10
+		c.MaxBodyBytes = 4096
+		c.Routes[0].WAFMode = "detection"
+		c.Routes[0].RateLimit = 1
+		c.Routes[0].MaxBodyBytes = 1024
+		c.Routes[0].AllowedMethods = []string{"GET", "POST"}
+		c.Routes[0].BotDenyPatterns = []string{"curl", `bad[- ]bot`}
+	})
+	if w := request(a, "PUT", "/", "", ""); w.Code != 405 || w.Header().Get("Allow") != "GET, POST" {
+		t.Fatalf("method policy: %d %q", w.Code, w.Header().Get("Allow"))
+	}
+	r := httptest.NewRequest("GET", "http://app.example.com/", nil)
+	r.URL.Scheme = ""
+	r.URL.Host = ""
+	r.RemoteAddr = "192.0.2.21:45000"
+	r.Header.Set("User-Agent", "Friendly Curl")
+	w := httptest.NewRecorder()
+	a.ServeHTTP(w, r)
+	if w.Code != 403 || !strings.Contains(a.Events.list()[0].Reason, "bot") {
+		t.Fatalf("bot policy: %d %+v", w.Code, a.Events.list()[0])
+	}
+	before := hits.Load()
+	if w := request(a, "POST", "/", strings.Repeat("a", 1025), "text/plain"); w.Code != 413 {
+		t.Fatalf("route body policy: %d", w.Code)
+	}
+	if hits.Load() != before {
+		t.Fatal("oversized route request reached upstream")
+	}
+	a.requestLimit = limiter{}
+	if w := request(a, "GET", "/", "", ""); w.Code != 200 {
+		t.Fatalf("first route request: %d", w.Code)
+	}
+	if w := request(a, "GET", "/", "", ""); w.Code != 429 {
+		t.Fatalf("route rate policy: %d", w.Code)
+	}
+	// Detection mode is scoped to this route and still records a CRS match.
+	a.requestLimit = limiter{}
+	if w := request(a, "GET", "/?q=%3Cscript%3Ealert(1)%3C%2Fscript%3E", "", ""); w.Code != 200 || a.Events.list()[0].Action != "detected" {
+		t.Fatalf("route WAF mode: %d %+v", w.Code, a.Events.list()[0])
+	}
+}
+
+func TestRoutePolicyBackwardCompatibility(t *testing.T) {
+	var c Config
+	if err := json.Unmarshal([]byte(`{"revision":1,"mode":"blocking","paranoia":1,"threshold":5,"maxBodyBytes":2097152,"rateLimit":120,"routes":[],"rules":[]}`), &c); err != nil {
+		t.Fatal(err)
+	}
+	normalize(&c)
+	if len(c.Routes) != 0 || c.Mode != "blocking" {
+		t.Fatalf("legacy config changed: %+v", c)
+	}
+	c.Routes = []Route{{ID: "legacy", Name: "Legacy", Host: "legacy.example.com", Path: "/", Upstreams: []string{"http://127.0.0.1:8080"}}}
+	if err := validate(c, true); err != nil {
+		t.Fatalf("legacy route rejected: %v", err)
+	}
+}
+
+func TestRoutePolicyValidation(t *testing.T) {
+	c := DefaultConfig()
+	c.Routes = []Route{{ID: "r", Name: "R", Host: "r.example.com", Path: "/", Upstreams: []string{"http://127.0.0.1:8080"}, RateLimit: c.RateLimit + 1}}
+	if err := validate(c, true); err == nil {
+		t.Fatal("route rate limit weakened global limit")
+	}
+	c.Routes[0].RateLimit = 0
+	c.Routes[0].BotDenyPatterns = []string{"["}
+	if err := validate(c, true); err == nil {
+		t.Fatal("invalid bot pattern accepted")
 	}
 }
 func TestConfigValidationAndPersistence(t *testing.T) {

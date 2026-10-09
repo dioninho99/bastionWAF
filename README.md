@@ -24,6 +24,8 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - Custom path, User-Agent, and method rules using literal case-insensitive substrings; rules can block or log.
 - IPv4/IPv6 CIDR deny list and optional allow list. Deny rules take precedence; allowed clients still pass through the WAF.
 - Fixed-window per-IP/per-route rate limiting, body limits, timeouts, connection limits, and bounded inspection buffers.
+- Each route may override WAF mode, paranoia, anomaly threshold, rate/body limits, allowed methods, and denied bot user-agent patterns. Empty/zero overrides inherit the global setting.
+- Route rate and body limits can only be stricter than (or equal to) the global limits, preventing a route policy from bypassing product-wide hard limits. Method and bot restrictions are enforced before WAF inspection and recorded in the audit stream.
 - Optional response inspection for MIME types supported by Coraza before data is sent to the client.
 - Events with request ID, CRS IDs, IP, host, path, status, and duration; JSON export and rotating JSONL files.
 - Password login, HttpOnly/SameSite cookies, CSRF and Origin checks, login limiting, and protected Prometheus metrics.

@@ -35,6 +35,13 @@ type Route struct {
 	Enabled         bool     `json:"enabled"`
 	PreserveHost    bool     `json:"preserveHost"`
 	ExcludedRuleIDs []int    `json:"excludedRuleIds"`
+	WAFMode         string   `json:"wafMode,omitempty"`
+	Paranoia        int      `json:"paranoia,omitempty"`
+	AnomalyThreshold int     `json:"anomalyThreshold,omitempty"`
+	RateLimit       int      `json:"rateLimit,omitempty"`
+	MaxBodyBytes    int64    `json:"maxBodyBytes,omitempty"`
+	AllowedMethods  []string `json:"allowedMethods,omitempty"`
+	BotDenyPatterns []string `json:"botDenyPatterns,omitempty"`
 }
 type Rule struct {
 	ID      string `json:"id"`
@@ -66,11 +73,18 @@ func normalize(c *Config) {
 		if c.Routes[i].ExcludedRuleIDs == nil {
 			c.Routes[i].ExcludedRuleIDs = []int{}
 		}
+		if c.Routes[i].AllowedMethods == nil {
+			c.Routes[i].AllowedMethods = []string{}
+		}
+		if c.Routes[i].BotDenyPatterns == nil {
+			c.Routes[i].BotDenyPatterns = []string{}
+		}
 	}
 }
 
 var identifier = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
 var domainName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$`)
+var httpMethod = regexp.MustCompile(`^[A-Z][A-Z0-9-]{0,19}$`)
 
 func validate(c Config, allowPrivate bool) error {
 	if c.Mode != "blocking" && c.Mode != "detection" {
@@ -130,6 +144,39 @@ func validate(c Config, allowPrivate bool) error {
 		for _, id := range r.ExcludedRuleIDs {
 			if id < 900000 || id > 999999 {
 				return errors.New("only CRS rule IDs 900000–999999 can be excluded")
+			}
+		}
+		if r.WAFMode != "" && r.WAFMode != "inherit" && r.WAFMode != "blocking" && r.WAFMode != "detection" {
+			return errors.New("route WAF mode must be inherit, blocking, or detection")
+		}
+		if r.Paranoia < 0 || r.Paranoia > 4 || r.AnomalyThreshold < 0 || r.AnomalyThreshold > 100 {
+			return errors.New("route paranoia must be 0–4 and anomaly threshold must be 0–100")
+		}
+		if r.RateLimit < 0 || r.RateLimit > c.RateLimit {
+			return errors.New("route rate limit must be 0 or no greater than the global limit")
+		}
+		if r.MaxBodyBytes != 0 && (r.MaxBodyBytes < 1024 || r.MaxBodyBytes > c.MaxBodyBytes) {
+			return errors.New("route body limit must be 0 or between 1 KiB and the global limit")
+		}
+		if len(r.AllowedMethods) > 16 {
+			return errors.New("a maximum of 16 allowed methods is supported per route")
+		}
+		methods := map[string]bool{}
+		for _, method := range r.AllowedMethods {
+			if !httpMethod.MatchString(method) || methods[method] {
+				return errors.New("allowed methods must be unique uppercase HTTP method tokens")
+			}
+			methods[method] = true
+		}
+		if len(r.BotDenyPatterns) > 32 {
+			return errors.New("a maximum of 32 bot user-agent patterns is supported per route")
+		}
+		for _, pattern := range r.BotDenyPatterns {
+			if len(pattern) < 1 || len(pattern) > 128 || strings.ContainsAny(pattern, "\r\n") {
+				return errors.New("bot user-agent patterns must be 1–128 characters without line breaks")
+			}
+			if _, err := regexp.Compile("(?i:" + pattern + ")"); err != nil {
+				return fmt.Errorf("invalid bot user-agent pattern: %w", err)
 			}
 		}
 	}

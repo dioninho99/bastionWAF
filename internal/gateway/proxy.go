@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/netip"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -113,18 +114,36 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		block(403, "IP is outside the allow list")
 		return
 	}
-	if !a.requestLimit.allow(route.config.ID+":"+ev.Client, c.RateLimit) {
-		w.Header().Set("Retry-After", "60")
-		block(429, "Rate Limit")
+	for _, method := range route.config.AllowedMethods {
+		if r.Method == method {
+			goto methodAllowed
+		}
+	}
+	if len(route.config.AllowedMethods) > 0 {
+		w.Header().Set("Allow", strings.Join(route.config.AllowedMethods, ", "))
+		block(405, "method is not allowed for route")
 		return
 	}
-	if r.ContentLength > c.MaxBodyBytes {
+methodAllowed:
+	for _, pattern := range route.config.BotDenyPatterns {
+		matched, _ := regexp.MatchString("(?i:"+pattern+")", r.UserAgent())
+		if matched {
+			block(403, "bot user-agent denied by route policy")
+			return
+		}
+	}
+	if !a.requestLimit.allow(route.config.ID+":"+ev.Client, route.rateLimit) {
+		w.Header().Set("Retry-After", "60")
+		block(429, "route rate limit exceeded")
+		return
+	}
+	if r.ContentLength > route.maxBodyBytes {
 		block(413, "request body is too large")
 		return
 	}
 	// Reserve conservatively for Go's growing read buffer, Coraza's copy, and response buffering.
 	// This bounds payload allocations even when an admin raises the per-request body limit.
-	reservation := c.MaxBodyBytes*4 + (4 << 20)
+	reservation := route.maxBodyBytes*4 + (4 << 20)
 	if !a.bodyMemory.TryAcquire(reservation) {
 		block(503, "inspection memory is exhausted")
 		return
@@ -147,7 +166,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if strings.Contains(strings.ToLower(value), strings.ToLower(rule.Value)) {
 			ev.Reason = "custom rule: " + rule.Name
-			if rule.Action == "block" && c.Mode == "blocking" {
+			if rule.Action == "block" && route.mode == "blocking" {
 				block(403, ev.Reason)
 				return
 			}
@@ -201,12 +220,12 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if interrupted(tx.ProcessRequestHeaders()) {
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, c.MaxBodyBytes+1))
+	body, err := io.ReadAll(io.LimitReader(r.Body, route.maxBodyBytes+1))
 	if err != nil {
 		block(400, "request body could not be read")
 		return
 	}
-	if int64(len(body)) > c.MaxBodyBytes {
+	if int64(len(body)) > route.maxBodyBytes {
 		block(413, "request body is too large")
 		return
 	}
