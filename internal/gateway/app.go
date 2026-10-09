@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -63,6 +64,9 @@ type App struct {
 	slots        chan struct{}
 	bodyMemory   *semaphore.Weighted
 	allowPrivateUpstreams bool
+	healthInterval time.Duration
+	healthStop chan struct{}
+	healthWG sync.WaitGroup
 }
 
 func New(dir, password string) (*App, error) {
@@ -74,7 +78,11 @@ func New(dir, password string) (*App, error) {
 		return nil, errors.New("BASTION_METRICS_TOKEN must be at least 32 characters long")
 	}
 	allowPrivate := os.Getenv("BASTION_ALLOW_PRIVATE_UPSTREAMS") == "true"
-	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), metricsToken: sha256.Sum256([]byte(metricsToken)), metricsTokenSet: metricsToken != "", sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate}
+	healthInterval, err := configuredHealthInterval()
+	if err != nil {
+		return nil, err
+	}
+	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), metricsToken: sha256.Sum256([]byte(metricsToken)), metricsTokenSet: metricsToken != "", sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate, healthInterval: healthInterval, healthStop: make(chan struct{})}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)
 	a.transport = http.DefaultTransport.(*http.Transport).Clone()
 	a.transport.Proxy = nil
@@ -122,9 +130,11 @@ func New(dir, password string) (*App, error) {
 	if e != nil {
 		return nil, e
 	}
+	a.healthWG.Add(1)
+	go a.healthLoop()
 	return a, nil
 }
-func (a *App) Close()         { a.transport.CloseIdleConnections(); a.Events.close() }
+func (a *App) Close()         { close(a.healthStop); a.healthWG.Wait(); a.transport.CloseIdleConnections(); a.Events.close() }
 func (a *App) Config() Config { return a.state.Load().config }
 func (a *App) HostAllowed(host string) bool {
 	for _, r := range a.state.Load().routes {
@@ -218,3 +228,21 @@ func (a *App) Update(c Config, revision int64) error {
 }
 
 var errConflict = errors.New("configuration changed meanwhile; please reload")
+
+const (
+	defaultHealthInterval = 30 * time.Second
+	minHealthInterval = 5 * time.Second
+	maxHealthInterval = 5 * time.Minute
+)
+
+func configuredHealthInterval() (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv("BASTION_UPSTREAM_HEALTH_INTERVAL"))
+	if raw == "" {
+		return defaultHealthInterval, nil
+	}
+	seconds, err := strconv.Atoi(raw)
+	if err != nil || seconds < int(minHealthInterval/time.Second) || seconds > int(maxHealthInterval/time.Second) {
+		return 0, fmt.Errorf("BASTION_UPSTREAM_HEALTH_INTERVAL must be between %d and %d seconds", int(minHealthInterval/time.Second), int(maxHealthInterval/time.Second))
+	}
+	return time.Duration(seconds) * time.Second, nil
+}
