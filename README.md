@@ -28,7 +28,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - Route rate and body limits can only be stricter than (or equal to) the global limits, preventing a route policy from bypassing product-wide hard limits. Method and bot restrictions are enforced before WAF inspection and recorded in the audit stream.
 - Optional response inspection for MIME types supported by Coraza before data is sent to the client.
 - Events with request ID, CRS IDs, IP, host, path, status, and duration; JSON export and rotating JSONL files.
-- Password login, HttpOnly/SameSite cookies, CSRF and Origin checks, login limiting, idle/absolute session expiry, session revocation, and protected Prometheus metrics.
+- Password login, HttpOnly/SameSite cookies, CSRF and Origin checks, login limiting, idle/absolute session expiry, session revocation, and protected Prometheus metrics. The Settings page exposes active administrator sessions and a revoke-all control.
 - Atomic configuration persistence and activation without restart; revisions prevent concurrent overwrites.
 
 ## Start in the LXC
