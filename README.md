@@ -63,7 +63,7 @@ ssh -L 9090:127.0.0.1:9090 your-user@LXC-IP
 
 Open [http://localhost:9090](http://localhost:9090) and sign in with the secret. The tunnel encrypts transport. For direct management-network access, set `BASTION_ADMIN_BIND` to the internal LXC address. The admin listener is HTTP-only in this release, so use SSH/VPN access and never expose port 9090 to the Internet. It is **not** a path on the public proxy listener.
 
-To serve the admin UI through a TLS reverse proxy such as Zoraxy, publish the admin port on the LXC management interface, set `BASTION_ADMIN_ORIGIN` to the exact external origin (for example `https://admin.example.com`), and proxy that hostname to `http://LXC-IP:9090`. Keep the admin hostname restricted to the management network.
+To serve the admin UI through a TLS reverse proxy such as Zoraxy, publish the admin port on the LXC management interface, set `BASTION_ADMIN_ORIGIN=https://web.cyberpotato.ch`, and proxy that hostname to `http://LXC-IP:9090`. Keep the admin hostname restricted to the management network.
 
 ### First application
 
