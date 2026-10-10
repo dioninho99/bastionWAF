@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/oauth2"
 	_ "modernc.org/sqlite"
 )
@@ -41,6 +42,8 @@ type authUser struct {
 	Role      string    `json:"role"`
 	CreatedAt time.Time `json:"createdAt"`
 	LastLogin time.Time `json:"lastLogin"`
+	Username  string    `json:"username,omitempty"`
+	Source    string    `json:"source"`
 }
 
 func openAuthDB(dir string) (*sql.DB, error) {
@@ -52,12 +55,24 @@ func openAuthDB(dir string) (*sql.DB, error) {
 		return nil, err
 	}
 	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS users (
-		subject TEXT PRIMARY KEY, email TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
+		subject TEXT PRIMARY KEY, username TEXT UNIQUE, password_hash TEXT NOT NULL DEFAULT '',
+		email TEXT NOT NULL DEFAULT '', name TEXT NOT NULL DEFAULT '',
 		role TEXT NOT NULL CHECK(role IN ('admin','viewer')), created_at INTEGER NOT NULL,
 		last_login INTEGER NOT NULL
 	)`); err != nil {
 		db.Close()
 		return nil, err
+	}
+	// Migrate databases created before local users existed.
+	for _, column := range []string{"username TEXT", "password_hash TEXT NOT NULL DEFAULT ''"} {
+		if _, err := db.Exec(`ALTER TABLE users ADD COLUMN ` + column); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			db.Close()
+			return nil, fmt.Errorf("users database migration: %w", err)
+		}
+	}
+	if _, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS users_username_idx ON users(username) WHERE username IS NOT NULL`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("users database index migration: %w", err)
 	}
 	return db, nil
 }
@@ -107,7 +122,7 @@ func (a *App) upsertOIDCUser(ctx context.Context, subject, email, name, role str
 }
 
 func (a *App) listUsers(ctx context.Context) ([]authUser, error) {
-	rows, err := a.users.QueryContext(ctx, `SELECT subject,email,name,role,created_at,last_login FROM users ORDER BY name,subject`)
+	rows, err := a.users.QueryContext(ctx, `SELECT subject,email,name,role,created_at,last_login,COALESCE(username,''),CASE WHEN password_hash != '' THEN 'local' ELSE 'oidc' END FROM users ORDER BY name,subject`)
 	if err != nil {
 		return nil, err
 	}
@@ -116,13 +131,95 @@ func (a *App) listUsers(ctx context.Context) ([]authUser, error) {
 	for rows.Next() {
 		var u authUser
 		var created, login int64
-		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &created, &login); err != nil {
+		if err := rows.Scan(&u.Subject, &u.Email, &u.Name, &u.Role, &created, &login, &u.Username, &u.Source); err != nil {
 			return nil, err
 		}
 		u.CreatedAt, u.LastLogin = time.Unix(created, 0).UTC(), time.Unix(login, 0).UTC()
 		users = append(users, u)
 	}
 	return users, rows.Err()
+}
+
+func validUsername(username string) bool {
+	if len(username) < 3 || len(username) > 64 || strings.ContainsAny(username, " \t\r\n") {
+		return false
+	}
+	for _, r := range username {
+		if !(r == '_' || r == '-' || r == '.' ||
+			r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func hashPassword(password string) (string, error) {
+	if len(password) < 12 || len(password) > 256 {
+		return "", errors.New("password must be 12-256 characters")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(hash), err
+}
+
+func (a *App) authenticateLocal(ctx context.Context, username, password string) (string, string, error) {
+	if !validUsername(username) || password == "" {
+		return "", "", sql.ErrNoRows
+	}
+	var subject, role, hash string
+	err := a.users.QueryRowContext(ctx,
+		`SELECT subject,role,password_hash FROM users WHERE username=?`,
+		username).Scan(&subject, &role, &hash)
+	if err != nil || hash == "" || bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
+		return "", "", sql.ErrNoRows
+	}
+	if _, err = a.users.ExecContext(ctx,
+		`UPDATE users SET last_login=? WHERE subject=?`, time.Now().Unix(), subject); err != nil {
+		return "", "", err
+	}
+	return subject, role, nil
+}
+
+func (a *App) createLocalUser(ctx context.Context, username, password, role string) error {
+	if !validUsername(username) || (role != "admin" && role != "viewer") {
+		return errors.New("username or role is invalid")
+	}
+	hash, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+	now := time.Now().Unix()
+	_, err = a.users.ExecContext(ctx,
+		`INSERT INTO users(subject,username,password_hash,name,role,created_at,last_login)
+		 VALUES(?,?,?,?,?,?,?)`,
+		"local:"+username, username, hash, username, role, now, now)
+	return err
+}
+
+func (a *App) changeLocalPassword(ctx context.Context, username, password string) error {
+	hash, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+	result, err := a.users.ExecContext(ctx,
+		`UPDATE users SET password_hash=? WHERE username=?`, hash, username)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return sql.ErrNoRows
+	}
+	a.authMu.Lock()
+	for key, s := range a.sessions {
+		if s.User == "local:"+username {
+			delete(a.sessions, key)
+		}
+	}
+	a.authMu.Unlock()
+	return nil
 }
 
 func validSubject(subject string) bool {

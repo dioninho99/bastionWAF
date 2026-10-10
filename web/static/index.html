@@ -19,7 +19,9 @@
   <h1>Hold the<br>perimeter.</h1>
   <p>Your applications. Your rules.<br>One gateway between them and the outside world.</p>
   <form id="login-form">
-   <label for="password">Admin password</label>
+   <label for="username">Username <span class="field-help">(optional for global admin password)</span></label>
+   <input id="username" name="username" autocomplete="username" placeholder="Local username">
+   <label for="password">Password</label>
    <input id="password" name="password" type="password" autocomplete="current-password" required minlength="20" placeholder="Enter your admin password">
    <button class="primary" type="submit">Sign in to Bastion <span aria-hidden="true">→</span></button>
    <p id="login-error" class="form-error" role="alert"></p>
