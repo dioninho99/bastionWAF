@@ -33,6 +33,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - Password login, HttpOnly/SameSite cookies, CSRF and Origin checks, login limiting, idle/absolute session expiry, session revocation, and protected Prometheus metrics. The Settings page exposes active administrator sessions and a revoke-all control.
 - Optional generic OpenID Connect login stores mapped users and `admin`/`viewer` roles in SQLite (`data/users.db`). Enable it with the `BASTION_OIDC_*` settings in `.env.example`; administrators may change configuration while viewers are read-only. Routes with `"oidcProtected": true` can require OIDC and receive `X-Authenticated-User` and `X-Authenticated-Role` headers. Password login remains available as a fallback.
 - Local users can be created and managed through the admin API (`POST /api/users`, password changes at `POST /api/users/{subject}/password`, and role/delete endpoints). Local credentials use bcrypt hashes, are labeled `local`, and existing SQLite user databases are migrated in place.
+- The GUI also exposes OIDC and certificate management. OIDC settings and Cloudflare/ACME settings are stored in the protected SQLite database; secrets are write-only and never returned. Uploaded PEM certificates and keys are validated as a matching, non-expired leaf pair and stored under `data/certificates` with mode 0600. Changes report `restartRequired`; a process restart is required before TLS/OIDC runtime configuration changes take effect.
 - Atomic configuration persistence and activation without restart; revisions prevent concurrent overwrites.
 
 ## Start in the LXC
@@ -163,3 +164,4 @@ compose.yaml        LXC/Docker deployment
 ```
 
 References: [Coraza](https://coraza.io/docs/), [OWASP CRS](https://coreruleset.org/docs/), [Go ReverseProxy](https://pkg.go.dev/net/http/httputil#ReverseProxy), [autocert](https://pkg.go.dev/golang.org/x/crypto/acme/autocert).
+

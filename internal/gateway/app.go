@@ -74,6 +74,7 @@ type App struct {
 	users                 *sql.DB
 	oidc                  *oidcConfig
 	oidcPending           map[[32]byte]oidcPending
+	dataDir               string
 }
 
 func New(dir, password string) (*App, error) {
@@ -93,17 +94,25 @@ func New(dir, password string) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), metricsToken: sha256.Sum256([]byte(metricsToken)), metricsTokenSet: metricsToken != "", sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate, healthInterval: healthInterval, healthStop: make(chan struct{}), alertWebhook: alertWebhook, alerts: make(chan upstreamAlert, 32)}
+	a := &App{configPath: filepath.Join(dir, "config.json"), dataDir: dir, started: time.Now(), password: sha256.Sum256([]byte(password)), metricsToken: sha256.Sum256([]byte(metricsToken)), metricsTokenSet: metricsToken != "", sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate, healthInterval: healthInterval, healthStop: make(chan struct{}), alertWebhook: alertWebhook, alerts: make(chan upstreamAlert, 32)}
 	a.users, err = openAuthDB(dir)
 	if err != nil {
 		return nil, err
 	}
-	issuer := strings.TrimSpace(os.Getenv("BASTION_OIDC_ISSUER"))
+	oidcSaved, settingsErr := a.oidcSettings(context.Background())
+	if settingsErr != nil {
+		a.users.Close()
+		return nil, settingsErr
+	}
+	issuer := strings.TrimSpace(oidcSaved.Issuer)
 	if issuer != "" {
-		a.oidc, err = setupOIDC(context.Background(), issuer, os.Getenv("BASTION_OIDC_CLIENT_ID"), os.Getenv("BASTION_OIDC_CLIENT_SECRET"), os.Getenv("BASTION_OIDC_REDIRECT_URI"), os.Getenv("BASTION_OIDC_ADMIN_ENABLED") == "true", os.Getenv("BASTION_PROXY_OIDC_ENABLED") == "true")
+		a.oidc, err = setupOIDC(context.Background(), issuer, oidcSaved.ClientID, oidcSaved.ClientSecret, oidcSaved.RedirectURI, oidcSaved.AdminEnabled, oidcSaved.ProxyEnabled)
 		if err != nil {
 			a.users.Close()
 			return nil, err
+		}
+		if oidcSaved.RoleClaim != "" {
+			a.oidc.RoleClaim = oidcSaved.RoleClaim
 		}
 	}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)

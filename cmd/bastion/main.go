@@ -65,10 +65,15 @@ func run() error {
 
 	defer app.Close()
 	admin := server(env("BASTION_ADMIN_ADDR", "127.0.0.1:9090"), app.AdminHandler(web.Handler(), os.Getenv("BASTION_ADMIN_ORIGIN"), os.Getenv("BASTION_ADMIN_SECURE_COOKIE") == "true"))
-	cert, key := os.Getenv("BASTION_TLS_CERT"), os.Getenv("BASTION_TLS_KEY")
-	email := os.Getenv("BASTION_ACME_EMAIL")
-	dnsProvider := strings.ToLower(strings.TrimSpace(os.Getenv("BASTION_ACME_DNS_PROVIDER")))
-	dnsDomains := splitCSV(os.Getenv("BASTION_ACME_DOMAINS"))
+	tlsConfig, err := app.LoadTLSConfiguration()
+	if err != nil {
+		return fmt.Errorf("load persisted TLS configuration: %w", err)
+	}
+	cert, key := tlsConfig.CertificateFile, tlsConfig.KeyFile
+	email, dnsProvider, dnsDomains := tlsConfig.Email, tlsConfig.DNSProvider, tlsConfig.Domains
+	if tlsConfig.Persisted && tlsConfig.Mode == "manual" && (cert == "" || key == "") {
+		return errors.New("persisted manual TLS configuration has no certificate and key")
+	}
 	if (cert == "") != (key == "") {
 		return errors.New("TLS_CERT and TLS_KEY must be set together")
 	}
@@ -86,7 +91,7 @@ func run() error {
 	var manager *autocert.Manager
 	var dnsManager *acmeclient.Manager
 	if dnsProvider == "cloudflare" {
-		dnsManager, err = acmeclient.NewCloudflare(context.Background(), filepath.Join(data, "acme-dns"), email, os.Getenv("BASTION_ACME_DNS_API_TOKEN"), dnsDomains)
+		dnsManager, err = acmeclient.NewCloudflare(context.Background(), filepath.Join(data, "acme-dns"), email, tlsConfig.DNSToken, dnsDomains)
 		if err != nil {
 			return err
 		}
