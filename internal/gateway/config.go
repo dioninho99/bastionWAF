@@ -27,34 +27,34 @@ type Config struct {
 	Rules              []Rule   `json:"rules"`
 }
 type Route struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Host            string   `json:"host"`
-	Path            string   `json:"path"`
-	Upstreams       []string `json:"upstreams"`
-	Enabled         bool     `json:"enabled"`
-	PreserveHost    bool     `json:"preserveHost"`
-	ExcludedRuleIDs []int    `json:"excludedRuleIds"`
-	WAFMode         string   `json:"wafMode,omitempty"`
-	Paranoia        int      `json:"paranoia,omitempty"`
-	AnomalyThreshold int     `json:"anomalyThreshold,omitempty"`
-	RateLimit       int      `json:"rateLimit,omitempty"`
-	MaxBodyBytes    int64    `json:"maxBodyBytes,omitempty"`
-	AllowedMethods  []string `json:"allowedMethods,omitempty"`
-	BotDenyPatterns []string `json:"botDenyPatterns,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Host                string   `json:"host"`
+	Path                string   `json:"path"`
+	Upstreams           []string `json:"upstreams"`
+	Enabled             bool     `json:"enabled"`
+	PreserveHost        bool     `json:"preserveHost"`
+	ExcludedRuleIDs     []int    `json:"excludedRuleIds"`
+	WAFMode             string   `json:"wafMode,omitempty"`
+	Paranoia            int      `json:"paranoia,omitempty"`
+	AnomalyThreshold    int      `json:"anomalyThreshold,omitempty"`
+	RateLimit           int      `json:"rateLimit,omitempty"`
+	MaxBodyBytes        int64    `json:"maxBodyBytes,omitempty"`
+	AllowedMethods      []string `json:"allowedMethods,omitempty"`
+	BotDenyPatterns     []string `json:"botDenyPatterns,omitempty"`
 	AllowedContentTypes []string `json:"allowedContentTypes,omitempty"`
-	RequireContentType bool `json:"requireContentType,omitempty"`
-	SecurityHeaders bool `json:"securityHeaders,omitempty"`
-	OIDCProtected bool `json:"oidcProtected,omitempty"`
+	RequireContentType  bool     `json:"requireContentType,omitempty"`
+	SecurityHeaders     bool     `json:"securityHeaders,omitempty"`
+	OIDCProtected       bool     `json:"oidcProtected,omitempty"`
 }
 type Rule struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
 	Category string `json:"category,omitempty"`
-	Field   string `json:"field"`
-	Value   string `json:"value"`
-	Action  string `json:"action"`
-	Enabled bool   `json:"enabled"`
+	Field    string `json:"field"`
+	Value    string `json:"value"`
+	Action   string `json:"action"`
+	Enabled  bool   `json:"enabled"`
 }
 
 func DefaultConfig() Config {

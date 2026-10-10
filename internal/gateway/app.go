@@ -25,55 +25,55 @@ import (
 )
 
 type routeRuntime struct {
-	config  Route
-	targets []*upstreamTarget
-	next    atomic.Uint64
-	waf     coraza.WAF
-	mode    string
-	paranoia int
-	threshold int
+	config       Route
+	targets      []*upstreamTarget
+	next         atomic.Uint64
+	waf          coraza.WAF
+	mode         string
+	paranoia     int
+	threshold    int
 	maxBodyBytes int64
-	rateLimit int
+	rateLimit    int
 }
 type upstreamTarget struct {
-	url *url.URL
-	mu sync.RWMutex
-	failureCount int
+	url            *url.URL
+	mu             sync.RWMutex
+	failureCount   int
 	unhealthyUntil time.Time
-	lastStatus int
-	lastError string
-	lastCheck time.Time
+	lastStatus     int
+	lastError      string
+	lastCheck      time.Time
 }
 type snapshot struct {
 	config Config
 	routes []*routeRuntime
 }
 type App struct {
-	state        atomic.Pointer[snapshot]
-	edit         sync.Mutex
-	configPath   string
-	Events       *EventStore
-	started      time.Time
-	password     [32]byte
-	metricsToken  [32]byte
-	metricsTokenSet bool
-	authMu       sync.Mutex
-	sessions     map[[32]byte]session
-	loginLimit   limiter
-	requestLimit limiter
-	transport    *http.Transport
-	slots        chan struct{}
-	bodyMemory   *semaphore.Weighted
+	state                 atomic.Pointer[snapshot]
+	edit                  sync.Mutex
+	configPath            string
+	Events                *EventStore
+	started               time.Time
+	password              [32]byte
+	metricsToken          [32]byte
+	metricsTokenSet       bool
+	authMu                sync.Mutex
+	sessions              map[[32]byte]session
+	loginLimit            limiter
+	requestLimit          limiter
+	transport             *http.Transport
+	slots                 chan struct{}
+	bodyMemory            *semaphore.Weighted
 	allowPrivateUpstreams bool
-	healthInterval time.Duration
-	healthStop chan struct{}
-	healthWG sync.WaitGroup
-	alertWebhook string
-	alerts chan upstreamAlert
-	alertWG sync.WaitGroup
-	users *sql.DB
-	oidc *oidcConfig
-	oidcPending map[[32]byte]oidcPending
+	healthInterval        time.Duration
+	healthStop            chan struct{}
+	healthWG              sync.WaitGroup
+	alertWebhook          string
+	alerts                chan upstreamAlert
+	alertWG               sync.WaitGroup
+	users                 *sql.DB
+	oidc                  *oidcConfig
+	oidcPending           map[[32]byte]oidcPending
 }
 
 func New(dir, password string) (*App, error) {
@@ -95,11 +95,16 @@ func New(dir, password string) (*App, error) {
 	}
 	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), metricsToken: sha256.Sum256([]byte(metricsToken)), metricsTokenSet: metricsToken != "", sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate, healthInterval: healthInterval, healthStop: make(chan struct{}), alertWebhook: alertWebhook, alerts: make(chan upstreamAlert, 32)}
 	a.users, err = openAuthDB(dir)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	issuer := strings.TrimSpace(os.Getenv("BASTION_OIDC_ISSUER"))
 	if issuer != "" {
 		a.oidc, err = setupOIDC(context.Background(), issuer, os.Getenv("BASTION_OIDC_CLIENT_ID"), os.Getenv("BASTION_OIDC_CLIENT_SECRET"), os.Getenv("BASTION_OIDC_REDIRECT_URI"), os.Getenv("BASTION_OIDC_ADMIN_ENABLED") == "true", os.Getenv("BASTION_PROXY_OIDC_ENABLED") == "true")
-		if err != nil { a.users.Close(); return nil, err }
+		if err != nil {
+			a.users.Close()
+			return nil, err
+		}
 	}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)
 	a.transport = http.DefaultTransport.(*http.Transport).Clone()
@@ -156,7 +161,15 @@ func New(dir, password string) (*App, error) {
 	}
 	return a, nil
 }
-func (a *App) Close()         { close(a.healthStop); a.healthWG.Wait(); close(a.alerts); a.alertWG.Wait(); a.transport.CloseIdleConnections(); a.Events.close(); a.users.Close() }
+func (a *App) Close() {
+	close(a.healthStop)
+	a.healthWG.Wait()
+	close(a.alerts)
+	a.alertWG.Wait()
+	a.transport.CloseIdleConnections()
+	a.Events.close()
+	a.users.Close()
+}
 func (a *App) Config() Config { return a.state.Load().config }
 func (a *App) HostAllowed(host string) bool {
 	for _, r := range a.state.Load().routes {
@@ -253,8 +266,8 @@ var errConflict = errors.New("configuration changed meanwhile; please reload")
 
 const (
 	defaultHealthInterval = 30 * time.Second
-	minHealthInterval = 5 * time.Second
-	maxHealthInterval = 5 * time.Minute
+	minHealthInterval     = 5 * time.Second
+	maxHealthInterval     = 5 * time.Minute
 )
 
 func configuredHealthInterval() (time.Duration, error) {
