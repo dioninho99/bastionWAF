@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,18 @@ type oidcConfig struct {
 	Admin     bool
 	Proxy     bool
 	RoleClaim string
+}
+
+type oidcSettings struct {
+	Issuer           string `json:"issuer"`
+	ClientID         string `json:"clientId"`
+	ClientSecret     string `json:"-"`
+	RedirectURI      string `json:"redirectUri"`
+	RoleClaim        string `json:"roleClaim"`
+	AdminEnabled     bool   `json:"adminEnabled"`
+	ProxyEnabled     bool   `json:"proxyEnabled"`
+	SecretConfigured bool   `json:"secretConfigured"`
+	RestartRequired  bool   `json:"restartRequired"`
 }
 
 type oidcPending struct {
@@ -74,7 +87,60 @@ func openAuthDB(dir string) (*sql.DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("users database index migration: %w", err)
 	}
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS auth_settings (id INTEGER PRIMARY KEY CHECK(id=1), issuer TEXT NOT NULL DEFAULT '', client_id TEXT NOT NULL DEFAULT '', client_secret TEXT NOT NULL DEFAULT '', redirect_uri TEXT NOT NULL DEFAULT '', role_claim TEXT NOT NULL DEFAULT 'role', admin_enabled INTEGER NOT NULL DEFAULT 0, proxy_enabled INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if _, err = db.Exec(`CREATE TABLE IF NOT EXISTS tls_settings (id INTEGER PRIMARY KEY CHECK(id=1), mode TEXT NOT NULL DEFAULT 'manual', email TEXT NOT NULL DEFAULT '', dns_provider TEXT NOT NULL DEFAULT '', domains TEXT NOT NULL DEFAULT '', dns_token TEXT NOT NULL DEFAULT '')`); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return db, nil
+}
+
+func (a *App) oidcSettings(ctx context.Context) (oidcSettings, error) {
+	var s oidcSettings
+	var admin, proxy int
+	err := a.users.QueryRowContext(ctx, `SELECT issuer,client_id,client_secret,redirect_uri,role_claim,admin_enabled,proxy_enabled FROM auth_settings WHERE id=1`).Scan(&s.Issuer, &s.ClientID, &s.ClientSecret, &s.RedirectURI, &s.RoleClaim, &admin, &proxy)
+	if errors.Is(err, sql.ErrNoRows) {
+		s.Issuer, s.ClientID, s.RedirectURI = os.Getenv("BASTION_OIDC_ISSUER"), os.Getenv("BASTION_OIDC_CLIENT_ID"), os.Getenv("BASTION_OIDC_REDIRECT_URI")
+		s.ClientSecret, s.RoleClaim, s.AdminEnabled, s.ProxyEnabled = os.Getenv("BASTION_OIDC_CLIENT_SECRET"), envOr("BASTION_OIDC_ROLE_CLAIM", "role"), os.Getenv("BASTION_OIDC_ADMIN_ENABLED") == "true", os.Getenv("BASTION_PROXY_OIDC_ENABLED") == "true"
+		s.SecretConfigured = s.ClientSecret != ""
+		return s, nil
+	}
+	s.AdminEnabled, s.ProxyEnabled, s.SecretConfigured = admin != 0, proxy != 0, s.ClientSecret != ""
+	return s, err
+}
+
+func (a *App) saveOIDCSettings(ctx context.Context, s oidcSettings) error {
+	s.Issuer, s.ClientID, s.RedirectURI = strings.TrimSpace(s.Issuer), strings.TrimSpace(s.ClientID), strings.TrimSpace(s.RedirectURI)
+	if s.Issuer == "" && (s.AdminEnabled || s.ProxyEnabled) {
+		return errors.New("issuer is required when OIDC is enabled")
+	}
+	if s.Issuer != "" {
+		if s.ClientID == "" || s.RedirectURI == "" {
+			return errors.New("OIDC client ID and redirect URI are required")
+		}
+		for _, raw := range []string{s.Issuer, s.RedirectURI} {
+			u, err := url.Parse(raw)
+			if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Fragment != "" {
+				return errors.New("issuer and redirect URI must be absolute HTTP(S) URLs without credentials or fragments")
+			}
+		}
+	}
+
+	if s.RoleClaim == "" {
+		s.RoleClaim = "role"
+	}
+	admin, proxy := 0, 0
+	if s.AdminEnabled {
+		admin = 1
+	}
+	if s.ProxyEnabled {
+		proxy = 1
+	}
+	_, err := a.users.ExecContext(ctx, `INSERT INTO auth_settings(id,issuer,client_id,client_secret,redirect_uri,role_claim,admin_enabled,proxy_enabled) VALUES(1,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET issuer=excluded.issuer,client_id=excluded.client_id,client_secret=CASE WHEN excluded.client_secret='' THEN auth_settings.client_secret ELSE excluded.client_secret END,redirect_uri=excluded.redirect_uri,role_claim=excluded.role_claim,admin_enabled=excluded.admin_enabled,proxy_enabled=excluded.proxy_enabled`, s.Issuer, s.ClientID, s.ClientSecret, s.RedirectURI, s.RoleClaim, admin, proxy)
+	return err
 }
 
 func setupOIDC(ctx context.Context, issuer, clientID, secret, redirect string, admin, proxy bool) (*oidcConfig, error) {

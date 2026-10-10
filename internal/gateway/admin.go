@@ -153,6 +153,112 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 		}
 		jsonReply(w, http.StatusOK, users)
 	}))
+	mux.HandleFunc("GET /api/oidc", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		s, err := a.oidcSettings(r.Context())
+		if err != nil {
+			apiError(w, 500, "OIDC settings unavailable")
+			return
+		}
+		s.SecretConfigured = s.ClientSecret != ""
+		s.ClientSecret = ""
+		s.RestartRequired = true
+		jsonReply(w, 200, s)
+	}))
+	mux.HandleFunc("PUT /api/oidc", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Issuer, ClientID, ClientSecret, RedirectURI, RoleClaim string
+			AdminEnabled, ProxyEnabled                             bool
+		}
+		if err := readJSON(w, r, &body); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		current, err := a.oidcSettings(r.Context())
+		if err != nil {
+			apiError(w, 500, "OIDC settings unavailable")
+			return
+		}
+		if body.ClientSecret == "" {
+			body.ClientSecret = current.ClientSecret
+		}
+		if body.RoleClaim == "" {
+			body.RoleClaim = "role"
+		}
+		settings := oidcSettings{Issuer: body.Issuer, ClientID: body.ClientID, ClientSecret: body.ClientSecret, RedirectURI: body.RedirectURI, RoleClaim: body.RoleClaim, AdminEnabled: body.AdminEnabled, ProxyEnabled: body.ProxyEnabled}
+		if err := a.saveOIDCSettings(r.Context(), settings); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		settings.ClientSecret = ""
+		settings.SecretConfigured = body.ClientSecret != ""
+		settings.RestartRequired = true
+		jsonReply(w, 200, settings)
+	}))
+	mux.HandleFunc("GET /api/tls", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		settings, err := a.tlsSettings()
+		if err != nil {
+			apiError(w, 500, "TLS settings unavailable")
+			return
+		}
+		jsonReply(w, 200, settings)
+	}))
+	mux.HandleFunc("PUT /api/tls", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Mode, Email, DNSProvider, Domains, DNSToken string }
+		if err := readJSON(w, r, &body); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		var domains []string
+		for _, domain := range strings.Split(body.Domains, ",") {
+			if domain = strings.TrimSpace(domain); domain != "" {
+				domains = append(domains, domain)
+			}
+		}
+		if err := a.saveTLSSettings(body.Mode, body.Email, body.DNSProvider, domains, body.DNSToken); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		settings, err := a.tlsSettings()
+		if err != nil {
+			apiError(w, 500, "TLS settings unavailable")
+			return
+		}
+		jsonReply(w, 200, settings)
+	}))
+	mux.HandleFunc("POST /api/tls/upload", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+		if err := r.ParseMultipartForm(2 << 20); err != nil {
+			apiError(w, 400, "invalid multipart upload")
+			return
+		}
+		certFile, certHeader, err := r.FormFile("certificate")
+		if err != nil || certFile == nil || certHeader == nil {
+			apiError(w, 400, "certificate file is required")
+			return
+		}
+		defer certFile.Close()
+		keyFile, keyHeader, err := r.FormFile("key")
+		if err != nil || keyFile == nil || keyHeader == nil {
+			apiError(w, 400, "private key file is required")
+			return
+		}
+		defer keyFile.Close()
+		certPEM, err := io.ReadAll(io.LimitReader(certFile, 1<<20))
+		if err != nil {
+			apiError(w, 400, "certificate could not be read")
+			return
+		}
+		keyPEM, err := io.ReadAll(io.LimitReader(keyFile, 1<<20))
+		if err != nil {
+			apiError(w, 400, "private key could not be read")
+			return
+		}
+		if err := a.storeCertificate(certPEM, keyPEM); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		jsonReply(w, 200, a.certificateStatus())
+	}))
 	mux.HandleFunc("POST /api/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		var body struct{ Username, Password, Role string }
 		if err := readJSON(w, r, &body); err != nil {

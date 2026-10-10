@@ -12,16 +12,16 @@ import (
 )
 
 const (
-	activeHealthTimeout = 2 * time.Second
+	activeHealthTimeout     = 2 * time.Second
 	activeHealthConcurrency = 16
 )
 
 type upstreamAlert struct {
-	Target string `json:"target"`
-	Healthy bool `json:"healthy"`
-	Status int `json:"status,omitempty"`
-	Error string `json:"error,omitempty"`
-	Time time.Time `json:"time"`
+	Target  string    `json:"target"`
+	Healthy bool      `json:"healthy"`
+	Status  int       `json:"status,omitempty"`
+	Error   string    `json:"error,omitempty"`
+	Time    time.Time `json:"time"`
 }
 
 func (a *App) healthLoop() {
