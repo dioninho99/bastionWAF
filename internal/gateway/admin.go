@@ -16,13 +16,13 @@ import (
 )
 
 type session struct {
-	CSRF    string
-	Created time.Time
+	CSRF     string
+	Created  time.Time
 	LastSeen time.Time
-	Expires time.Time
-	Client  string
-	Role    string
-	User    string
+	Expires  time.Time
+	Client   string
+	Role     string
+	User     string
 }
 
 const sessionIdleTimeout = 30 * time.Minute
@@ -102,7 +102,10 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 		return func(w http.ResponseWriter, r *http.Request) {
 			s, ok := a.getSession(r)
 			if !ok {
-				if a.oidc != nil && a.oidc.Admin { http.Redirect(w, r, "/oauth2/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound); return }
+				if a.oidc != nil && a.oidc.Admin {
+					http.Redirect(w, r, "/oauth2/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
+					return
+				}
 				apiError(w, 401, "please sign in")
 				return
 			}
@@ -133,16 +136,31 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 	}))
 	mux.HandleFunc("GET /api/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		users, err := a.listUsers(r.Context())
-		if err != nil { apiError(w, http.StatusInternalServerError, "user database unavailable"); return }
+		if err != nil {
+			apiError(w, http.StatusInternalServerError, "user database unavailable")
+			return
+		}
 		jsonReply(w, http.StatusOK, users)
 	}))
 	updateUserRole := func(w http.ResponseWriter, r *http.Request) {
 		subject := r.PathValue("subject")
-		var body struct { Role string `json:"role"` }
-		if err := readJSON(w, r, &body); err != nil { apiError(w, http.StatusBadRequest, err.Error()); return }
-		if subject == "" || body.Role == "" { apiError(w, http.StatusBadRequest, "subject and role are required"); return }
+		var body struct {
+			Role string `json:"role"`
+		}
+		if err := readJSON(w, r, &body); err != nil {
+			apiError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if subject == "" || body.Role == "" {
+			apiError(w, http.StatusBadRequest, "subject and role are required")
+			return
+		}
 		if err := a.setUserRole(r.Context(), subject, body.Role); err != nil {
-			if errors.Is(err, sql.ErrNoRows) { apiError(w, http.StatusNotFound, "user not found") } else { apiError(w, http.StatusBadRequest, err.Error()) }
+			if errors.Is(err, sql.ErrNoRows) {
+				apiError(w, http.StatusNotFound, "user not found")
+			} else {
+				apiError(w, http.StatusBadRequest, err.Error())
+			}
 			return
 		}
 		jsonReply(w, http.StatusOK, map[string]bool{"ok": true})
@@ -151,7 +169,11 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 	mux.HandleFunc("PUT /api/users/{subject}/role", adminOnly(updateUserRole))
 	mux.HandleFunc("DELETE /api/users/{subject}", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		if err := a.deleteUser(r.Context(), r.PathValue("subject")); err != nil {
-			if errors.Is(err, sql.ErrNoRows) { apiError(w, http.StatusNotFound, "user not found") } else { apiError(w, http.StatusBadRequest, err.Error()) }
+			if errors.Is(err, sql.ErrNoRows) {
+				apiError(w, http.StatusNotFound, "user not found")
+			} else {
+				apiError(w, http.StatusBadRequest, err.Error())
+			}
 			return
 		}
 		jsonReply(w, http.StatusOK, map[string]bool{"ok": true})
