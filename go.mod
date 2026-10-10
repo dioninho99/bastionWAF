@@ -3,10 +3,13 @@ module bastionwaf
 go 1.25.0
 
 require (
+	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/corazawaf/coraza-coreruleset/v4 v4.25.0
 	github.com/corazawaf/coraza/v3 v3.8.1
 	golang.org/x/crypto v0.55.0
+	golang.org/x/oauth2 v0.30.0
 	golang.org/x/sync v0.22.0
+	modernc.org/sqlite v1.38.2
 )
 
 require (

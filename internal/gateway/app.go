@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net"
@@ -70,6 +71,9 @@ type App struct {
 	alertWebhook string
 	alerts chan upstreamAlert
 	alertWG sync.WaitGroup
+	users *sql.DB
+	oidc *oidcConfig
+	oidcPending map[[32]byte]oidcPending
 }
 
 func New(dir, password string) (*App, error) {
@@ -90,6 +94,13 @@ func New(dir, password string) (*App, error) {
 		return nil, err
 	}
 	a := &App{configPath: filepath.Join(dir, "config.json"), started: time.Now(), password: sha256.Sum256([]byte(password)), metricsToken: sha256.Sum256([]byte(metricsToken)), metricsTokenSet: metricsToken != "", sessions: map[[32]byte]session{}, slots: make(chan struct{}, 128), allowPrivateUpstreams: allowPrivate, healthInterval: healthInterval, healthStop: make(chan struct{}), alertWebhook: alertWebhook, alerts: make(chan upstreamAlert, 32)}
+	a.users, err = openAuthDB(dir)
+	if err != nil { return nil, err }
+	issuer := strings.TrimSpace(os.Getenv("BASTION_OIDC_ISSUER"))
+	if issuer != "" {
+		a.oidc, err = setupOIDC(context.Background(), issuer, os.Getenv("BASTION_OIDC_CLIENT_ID"), os.Getenv("BASTION_OIDC_CLIENT_SECRET"), os.Getenv("BASTION_OIDC_REDIRECT_URI"), os.Getenv("BASTION_OIDC_ADMIN_ENABLED") == "true", os.Getenv("BASTION_PROXY_OIDC_ENABLED") == "true")
+		if err != nil { a.users.Close(); return nil, err }
+	}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)
 	a.transport = http.DefaultTransport.(*http.Transport).Clone()
 	a.transport.Proxy = nil
@@ -145,7 +156,7 @@ func New(dir, password string) (*App, error) {
 	}
 	return a, nil
 }
-func (a *App) Close()         { close(a.healthStop); a.healthWG.Wait(); close(a.alerts); a.alertWG.Wait(); a.transport.CloseIdleConnections(); a.Events.close() }
+func (a *App) Close()         { close(a.healthStop); a.healthWG.Wait(); close(a.alerts); a.alertWG.Wait(); a.transport.CloseIdleConnections(); a.Events.close(); a.users.Close() }
 func (a *App) Config() Config { return a.state.Load().config }
 func (a *App) HostAllowed(host string) bool {
 	for _, r := range a.state.Load().routes {

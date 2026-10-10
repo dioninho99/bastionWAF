@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/netip"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -63,6 +64,10 @@ func deny(w http.ResponseWriter, status int, id string) {
 }
 
 func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if a.oidc != nil && a.oidc.Proxy && r.URL.Path == "/oauth2/callback" {
+		a.oidcCallback(w, r, a.oidc, os.Getenv("BASTION_ADMIN_SECURE_COOKIE") == "true")
+		return
+	}
 	start := time.Now()
 	s := a.state.Load()
 	c := s.config
@@ -99,6 +104,9 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if route == nil {
 		block(404, "no matching route")
+		return
+	}
+	if !a.oidcRouteAuth(w, r, a.oidc, route.config) {
 		return
 	}
 	ev.Route = route.config.Name
@@ -300,9 +308,15 @@ methodAllowed:
 			pr.Out.Header.Del("X-Forwarded-For")
 			pr.Out.Header.Del("X-Forwarded-Host")
 			pr.Out.Header.Del("X-Forwarded-Proto")
+			pr.Out.Header.Del("X-Authenticated-User")
+			pr.Out.Header.Del("X-Authenticated-Role")
 			pr.SetXForwarded()
 			pr.Out.Header.Set("X-Real-IP", ev.Client)
 			pr.Out.Header.Set("X-Request-ID", ev.ID)
+			if identity, ok := a.getSession(r); ok && identity.User != "" {
+				pr.Out.Header.Set("X-Authenticated-User", identity.User)
+				pr.Out.Header.Set("X-Authenticated-Role", identity.Role)
+			}
 			// Request identity encoding when response inspection is active.
 			if c.ResponseInspection {
 				pr.Out.Header.Set("Accept-Encoding", "identity")
