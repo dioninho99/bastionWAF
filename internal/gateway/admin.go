@@ -79,18 +79,29 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 			return
 		}
 		var body struct {
+			Username string `json:"username"`
 			Password string `json:"password"`
 		}
 		if e := readJSON(w, r, &body); e != nil {
 			apiError(w, 400, e.Error())
 			return
 		}
-		hash := sha256.Sum256([]byte(body.Password))
-		if subtle.ConstantTimeCompare(hash[:], a.password[:]) != 1 {
-			apiError(w, 401, "incorrect password")
-			return
+		role, user := "admin", "password"
+		if body.Username != "" {
+			var err error
+			user, role, err = a.authenticateLocal(r.Context(), body.Username, body.Password)
+			if err != nil {
+				apiError(w, 401, "incorrect username or password")
+				return
+			}
+		} else {
+			hash := sha256.Sum256([]byte(body.Password))
+			if subtle.ConstantTimeCompare(hash[:], a.password[:]) != 1 {
+				apiError(w, 401, "incorrect password")
+				return
+			}
 		}
-		token, s, err := a.newSession(r, "admin", "password")
+		token, s, err := a.newSession(r, role, user)
 		if err != nil {
 			apiError(w, 429, "too many active sessions")
 			return
@@ -141,6 +152,41 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 			return
 		}
 		jsonReply(w, http.StatusOK, users)
+	}))
+	mux.HandleFunc("POST /api/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		var body struct{ Username, Password, Role string }
+		if err := readJSON(w, r, &body); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		if err := a.createLocalUser(r.Context(), body.Username, body.Password, body.Role); err != nil {
+			apiError(w, 400, "could not create local user: "+err.Error())
+			return
+		}
+		jsonReply(w, http.StatusCreated, map[string]bool{"ok": true})
+	}))
+	mux.HandleFunc("POST /api/users/{subject}/password", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		subject := r.PathValue("subject")
+		if !strings.HasPrefix(subject, "local:") {
+			apiError(w, 400, "passwords can only be changed for local users")
+			return
+		}
+		var body struct {
+			Password string `json:"password"`
+		}
+		if err := readJSON(w, r, &body); err != nil {
+			apiError(w, 400, err.Error())
+			return
+		}
+		if err := a.changeLocalPassword(r.Context(), strings.TrimPrefix(subject, "local:"), body.Password); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				apiError(w, 404, "user not found")
+			} else {
+				apiError(w, 400, err.Error())
+			}
+			return
+		}
+		jsonReply(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
 	updateUserRole := func(w http.ResponseWriter, r *http.Request) {
 		subject := r.PathValue("subject")
