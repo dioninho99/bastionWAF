@@ -3,6 +3,7 @@ package gateway
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"io"
@@ -20,6 +21,8 @@ type session struct {
 	LastSeen time.Time
 	Expires time.Time
 	Client  string
+	Role    string
+	User    string
 }
 
 const sessionIdleTimeout = 30 * time.Minute
@@ -65,6 +68,10 @@ func (a *App) getSession(r *http.Request) (session, bool) {
 func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCookie bool) http.Handler {
 	allowedOrigin = strings.TrimRight(strings.TrimSpace(allowedOrigin), "/")
 	mux := http.NewServeMux()
+	if a.oidc != nil && a.oidc.Admin {
+		mux.HandleFunc("GET /oauth2/login", func(w http.ResponseWriter, r *http.Request) { a.oidcLogin(w, r, a.oidc, true) })
+		mux.HandleFunc("GET /oauth2/callback", func(w http.ResponseWriter, r *http.Request) { a.oidcCallback(w, r, a.oidc, secureCookie) })
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { jsonReply(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/login", func(w http.ResponseWriter, r *http.Request) {
 		if !a.loginLimit.allow(clientIP(r), 10) {
@@ -83,30 +90,24 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 			apiError(w, 401, "incorrect password")
 			return
 		}
-		token := randomID()
-		now := time.Now()
-		s := session{CSRF: randomID(), Created: now, LastSeen: now, Expires: now.Add(8 * time.Hour), Client: clientIP(r)}
-		a.authMu.Lock()
-		for k, v := range a.sessions {
-			if time.Now().After(v.Expires) {
-				delete(a.sessions, k)
-			}
-		}
-		if len(a.sessions) >= 100 {
-			a.authMu.Unlock()
+		token, s, err := a.newSession(r, "admin", "password")
+		if err != nil {
 			apiError(w, 429, "too many active sessions")
 			return
 		}
-		a.sessions[sha256.Sum256([]byte(token))] = s
-		a.authMu.Unlock()
-		http.SetCookie(w, &http.Cookie{Name: "bastion_session", Value: token, Path: "/", HttpOnly: true, Secure: secureCookie || r.TLS != nil, SameSite: http.SameSiteStrictMode, MaxAge: 8 * 3600})
+		setSessionCookie(w, r, token, secureCookie)
 		jsonReply(w, 200, map[string]string{"csrf": s.CSRF})
 	})
 	protected := func(fn http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
 			s, ok := a.getSession(r)
 			if !ok {
+				if a.oidc != nil && a.oidc.Admin { http.Redirect(w, r, "/oauth2/login?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound); return }
 				apiError(w, 401, "please sign in")
+				return
+			}
+			if r.Method != "GET" && r.Method != "HEAD" && s.Role != "admin" {
+				apiError(w, 403, "administrator role required")
 				return
 			}
 			if r.Method != "GET" && r.Method != "HEAD" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(s.CSRF)) != 1 {
@@ -116,9 +117,44 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 			fn(w, r)
 		}
 	}
+	adminOnly := func(fn http.HandlerFunc) http.HandlerFunc {
+		return protected(func(w http.ResponseWriter, r *http.Request) {
+			s, _ := a.getSession(r)
+			if s.Role != "admin" {
+				apiError(w, http.StatusForbidden, "administrator role required")
+				return
+			}
+			fn(w, r)
+		})
+	}
 	mux.HandleFunc("GET /api/session", protected(func(w http.ResponseWriter, r *http.Request) {
 		s, _ := a.getSession(r)
 		jsonReply(w, 200, map[string]string{"csrf": s.CSRF})
+	}))
+	mux.HandleFunc("GET /api/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		users, err := a.listUsers(r.Context())
+		if err != nil { apiError(w, http.StatusInternalServerError, "user database unavailable"); return }
+		jsonReply(w, http.StatusOK, users)
+	}))
+	updateUserRole := func(w http.ResponseWriter, r *http.Request) {
+		subject := r.PathValue("subject")
+		var body struct { Role string `json:"role"` }
+		if err := readJSON(w, r, &body); err != nil { apiError(w, http.StatusBadRequest, err.Error()); return }
+		if subject == "" || body.Role == "" { apiError(w, http.StatusBadRequest, "subject and role are required"); return }
+		if err := a.setUserRole(r.Context(), subject, body.Role); err != nil {
+			if errors.Is(err, sql.ErrNoRows) { apiError(w, http.StatusNotFound, "user not found") } else { apiError(w, http.StatusBadRequest, err.Error()) }
+			return
+		}
+		jsonReply(w, http.StatusOK, map[string]bool{"ok": true})
+	}
+	mux.HandleFunc("PATCH /api/users/{subject}/role", adminOnly(updateUserRole))
+	mux.HandleFunc("PUT /api/users/{subject}/role", adminOnly(updateUserRole))
+	mux.HandleFunc("DELETE /api/users/{subject}", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if err := a.deleteUser(r.Context(), r.PathValue("subject")); err != nil {
+			if errors.Is(err, sql.ErrNoRows) { apiError(w, http.StatusNotFound, "user not found") } else { apiError(w, http.StatusBadRequest, err.Error()) }
+			return
+		}
+		jsonReply(w, http.StatusOK, map[string]bool{"ok": true})
 	}))
 	mux.HandleFunc("POST /api/logout", protected(func(w http.ResponseWriter, r *http.Request) {
 		c, _ := r.Cookie("bastion_session")

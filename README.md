@@ -31,6 +31,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - Optional response inspection for MIME types supported by Coraza before data is sent to the client.
 - Events with request ID, CRS IDs, IP, host, path, status, and duration; JSON export and rotating JSONL files.
 - Password login, HttpOnly/SameSite cookies, CSRF and Origin checks, login limiting, idle/absolute session expiry, session revocation, and protected Prometheus metrics. The Settings page exposes active administrator sessions and a revoke-all control.
+- Optional generic OpenID Connect login stores mapped users and `admin`/`viewer` roles in SQLite (`data/users.db`). Enable it with the `BASTION_OIDC_*` settings in `.env.example`; administrators may change configuration while viewers are read-only. Routes with `"oidcProtected": true` can require OIDC and receive `X-Authenticated-User` and `X-Authenticated-Role` headers. Password login remains available as a fallback.
 - Atomic configuration persistence and activation without restart; revisions prevent concurrent overwrites.
 
 ## Start in the LXC

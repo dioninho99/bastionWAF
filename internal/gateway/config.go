@@ -45,6 +45,7 @@ type Route struct {
 	AllowedContentTypes []string `json:"allowedContentTypes,omitempty"`
 	RequireContentType bool `json:"requireContentType,omitempty"`
 	SecurityHeaders bool `json:"securityHeaders,omitempty"`
+	OIDCProtected bool `json:"oidcProtected,omitempty"`
 }
 type Rule struct {
 	ID      string `json:"id"`
