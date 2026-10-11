@@ -93,6 +93,8 @@ In blocking mode, the second request should return 403 and the UI should show th
 
 **Let's Encrypt:** Set a real `BASTION_ACME_EMAIL` in `.env` and run `docker compose up -d`. ACME and HTTP-to-HTTPS redirects are then enabled. Domain DNS and ports 80/443 must point to this LXC from the Internet. Certificates are requested only for enabled hosts and cached/renewed under `/data/acme`. Unknown hosts receive no certificates.
 
+DNS-01 certificate requests run in the background, so an unreachable ACME/DNS provider does not block the dashboard. HTTPS handshakes fail until a certificate is available; HTTP keeps redirecting to HTTPS. Failed requests retry after one minute with exponential backoff up to one hour, and each attempt is limited to five minutes. Check container logs for issuance errors; dashboard health alone does not confirm that HTTPS is ready. Invalid local TLS configuration can still prevent startup.
+
 **Wildcard certificates with Cloudflare DNS-01:** Set a scoped Cloudflare API token with `Zone:DNS:Edit` for the relevant zone, then explicitly list the certificate names. This mode supports names such as `example.com,*.example.com` and does not require inbound port 80 for ACME validation:
 
 ```dotenv
