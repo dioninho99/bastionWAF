@@ -14,6 +14,7 @@ type Event struct {
 	ID       string    `json:"id"`
 	Time     time.Time `json:"time"`
 	Client   string    `json:"client"`
+	Country  string    `json:"country,omitempty"`
 	Host     string    `json:"host"`
 	Method   string    `json:"method"`
 	Path     string    `json:"path"`

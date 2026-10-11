@@ -44,15 +44,6 @@ func hostOnly(h string) string {
 	}
 	return strings.ToLower(strings.TrimSuffix(h, "."))
 }
-func inCIDRs(ip netip.Addr, list []string) bool {
-	for _, s := range list {
-		p, _ := netip.ParsePrefix(s)
-		if p.Contains(ip) {
-			return true
-		}
-	}
-	return false
-}
 func pathMatches(path, prefix string) bool {
 	return prefix == "/" || path == prefix || strings.HasPrefix(path, strings.TrimSuffix(prefix, "/")+"/")
 }
@@ -106,21 +97,21 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		block(404, "no matching route")
 		return
 	}
-	if !a.oidcRouteAuth(w, r, a.oidc, route.config) {
-		return
-	}
 	ev.Route = route.config.Name
 	ip, err := netip.ParseAddr(ev.Client)
 	if err != nil {
 		block(400, "invalid client IP")
 		return
 	}
-	if inCIDRs(ip, c.DenyCIDRs) {
-		block(403, "IP deny list")
+	internal := prefixesContain(s.internal, ip)
+	if !internal && a.country != nil {
+		ev.Country = a.country(ip)
+	}
+	if reason := checkAccess(&s.access, &route.access, ip, internal, ev.Country); reason != "" {
+		block(403, reason)
 		return
 	}
-	if len(c.AllowCIDRs) > 0 && !inCIDRs(ip, c.AllowCIDRs) {
-		block(403, "IP is outside the allow list")
+	if !a.oidcRouteAuth(w, r, a.oidc, route.config) {
 		return
 	}
 	for _, method := range route.config.AllowedMethods {
