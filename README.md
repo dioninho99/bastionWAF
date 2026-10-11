@@ -165,3 +165,25 @@ compose.yaml        LXC/Docker deployment
 
 References: [Coraza](https://coraza.io/docs/), [OWASP CRS](https://coreruleset.org/docs/), [Go ReverseProxy](https://pkg.go.dev/net/http/httputil#ReverseProxy), [autocert](https://pkg.go.dev/golang.org/x/crypto/acme/autocert).
 
+
+### Configuration status and browser tests
+
+OIDC and TLS pages compare saved settings with the process startup configuration.
+“Saved · restart pending” means a service restart is needed; restoring the startup
+values clears the notice. “Active configuration” confirms a matching configuration,
+not successful certificate issuance, provider connectivity, or service health.
+Changes to a manual certificate or private key are included in this comparison.
+
+Run browser regressions with Node.js 22+, pnpm 11.25.0 and Go available:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm exec playwright install --no-shell chromium
+pnpm test:browser
+```
+
+The test fixture builds and starts an isolated gateway on localhost ports 19091
+and 18091 with temporary data and test credentials. It never uses existing
+`BASTION_*` environment settings. Failed tests retain a Playwright trace and HTML
+report; CI uploads these as artifacts for seven days. Traces contain test-only
+credentials and must not be collected against production.
