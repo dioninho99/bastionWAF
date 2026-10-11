@@ -21,14 +21,15 @@ import (
 )
 
 type Manager struct {
-	client *acme.Client
-	dns *cloudflare
-	email string
+	client  *acme.Client
+	dns     *cloudflare
+	email   string
 	domains []string
-	dir string
-	mu sync.RWMutex
-	cert *tls.Certificate
-	stop chan struct{}
+	dir     string
+	mu      sync.RWMutex
+	cert    *tls.Certificate
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 func NewCloudflare(ctx context.Context, dir, email, token string, domains []string) (*Manager, error) {
@@ -47,17 +48,21 @@ func NewCloudflare(ctx context.Context, dir, email, token string, domains []stri
 	if len(normalized) == 0 {
 		return nil, errors.New("ACME DNS-01 requires at least one non-empty domain")
 	}
-	m := &Manager{client: &acme.Client{Key: key, DirectoryURL: directory}, dns: newCloudflare(token), email: email, domains: normalized, dir: dir, stop: make(chan struct{})}
+	m := &Manager{client: &acme.Client{Key: key, DirectoryURL: directory}, dns: newCloudflare(token), email: email, domains: normalized, dir: dir, done: make(chan struct{})}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
+	delay := 12 * time.Hour
 	if err := m.loadCached(); err != nil {
-		slog.Info("ACME DNS certificate unavailable; requesting a new certificate", "error", err)
-		if err := m.obtain(ctx); err != nil {
-			return nil, err
-		}
+		slog.Info("ACME DNS certificate unavailable; requesting in background", "error", err)
+		delay = 0
 	}
-	go m.renewLoop()
+	workerCtx, cancel := context.WithCancel(ctx)
+	m.cancel = cancel
+	go func() {
+		defer close(m.done)
+		m.renewLoop(workerCtx, delay, time.Minute, 12*time.Hour, m.obtain)
+	}()
 	return m, nil
 }
 
@@ -70,27 +75,36 @@ func (m *Manager) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error)
 	return m.cert, nil
 }
 
+// Close cancels in-flight certificate requests and waits for the worker to exit.
 func (m *Manager) Close() {
-	select {
-	case <-m.stop:
-	default:
-		close(m.stop)
-	}
+	m.cancel()
+	<-m.done
 }
 
-func (m *Manager) renewLoop() {
-	ticker := time.NewTicker(12 * time.Hour)
-	defer ticker.Stop()
+func (m *Manager) renewLoop(ctx context.Context, delay, retry, interval time.Duration, obtain func(context.Context) error) {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	backoff := retry
 	for {
 		select {
-		case <-m.stop:
+		case <-ctx.Done():
 			return
-		case <-ticker.C:
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		if err := m.obtain(ctx); err != nil {
-			slog.Error("ACME DNS certificate renewal failed", "error", err)
+		case <-timer.C:
 		}
+		attempt, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		err := obtain(attempt)
 		cancel()
+		if ctx.Err() != nil {
+			return
+		}
+		if err != nil {
+			slog.Error("ACME DNS certificate request failed; dashboard remains available", "error", err, "retry_in", backoff)
+			timer.Reset(backoff)
+			backoff = min(backoff*2, time.Hour)
+		} else {
+			slog.Info("ACME DNS certificate ready")
+			backoff = retry
+			timer.Reset(interval)
 		}
 	}
 }
