@@ -35,6 +35,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - Password login, HttpOnly/SameSite cookies, CSRF and Origin checks, login limiting, idle/absolute session expiry, session revocation, and protected Prometheus metrics. The Settings page exposes active administrator sessions and a revoke-all control.
 - Optional generic OpenID Connect login stores mapped users and `admin`/`viewer` roles in SQLite (`data/users.db`). Enable it with the `BASTION_OIDC_*` settings in `.env.example`; administrators may change configuration while viewers are read-only. Routes with `"oidcProtected": true` can require OIDC and receive `X-Authenticated-User` and `X-Authenticated-Role` headers. Password login remains available as a fallback.
 - Local users can be created and managed through the admin API (`POST /api/users`, password changes at `POST /api/users/{subject}/password`, and role/delete endpoints). Local credentials use bcrypt hashes, are labeled `local`, and existing SQLite user databases are migrated in place.
+- The GUI also exposes OIDC and certificate management. OIDC settings and Cloudflare/ACME settings are stored in the protected SQLite database; secrets are write-only and never returned. Uploaded PEM certificates and keys are validated as a matching, non-expired leaf pair and stored under `data/certificates` with mode 0600. Changes report `restartRequired`; a process restart is required before TLS/OIDC runtime configuration changes take effect.
 - Atomic configuration persistence and activation without restart; revisions prevent concurrent overwrites.
 
 ## Start in the LXC
@@ -93,6 +94,8 @@ In blocking mode, the second request should return 403 and the UI should show th
 ## HTTPS
 
 **Let's Encrypt:** Set a real `BASTION_ACME_EMAIL` in `.env` and run `docker compose up -d`. ACME and HTTP-to-HTTPS redirects are then enabled. Domain DNS and ports 80/443 must point to this LXC from the Internet. Certificates are requested only for enabled hosts and cached/renewed under `/data/acme`. Unknown hosts receive no certificates.
+
+DNS-01 certificate requests run in the background, so an unreachable ACME/DNS provider does not block the dashboard. HTTPS handshakes fail until a certificate is available; HTTP keeps redirecting to HTTPS. Failed requests retry after one minute with exponential backoff up to one hour, and each attempt is limited to five minutes. Check container logs for issuance errors; dashboard health alone does not confirm that HTTPS is ready. Invalid local TLS configuration can still prevent startup.
 
 **Wildcard certificates with Cloudflare DNS-01:** Set a scoped Cloudflare API token with `Zone:DNS:Edit` for the relevant zone, then explicitly list the certificate names. This mode supports names such as `example.com,*.example.com` and does not require inbound port 80 for ACME validation:
 
@@ -177,3 +180,26 @@ compose.yaml        LXC/Docker deployment
 ```
 
 References: [Coraza](https://coraza.io/docs/), [OWASP CRS](https://coreruleset.org/docs/), [Go ReverseProxy](https://pkg.go.dev/net/http/httputil#ReverseProxy), [autocert](https://pkg.go.dev/golang.org/x/crypto/acme/autocert).
+
+
+### Configuration status and browser tests
+
+OIDC and TLS pages compare saved settings with the process startup configuration.
+“Saved · restart pending” means a service restart is needed; restoring the startup
+values clears the notice. “Active configuration” confirms a matching configuration,
+not successful certificate issuance, provider connectivity, or service health.
+Changes to a manual certificate or private key are included in this comparison.
+
+Run browser regressions with Node.js 22+, pnpm 11.25.0 and Go available:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm exec playwright install --no-shell chromium
+pnpm test:browser
+```
+
+The test fixture builds and starts an isolated gateway on localhost ports 19091
+and 18091 with temporary data and test credentials. It never uses existing
+`BASTION_*` environment settings. Failed tests retain a Playwright trace and HTML
+report; CI uploads these as artifacts for seven days. Traces contain test-only
+credentials and must not be collected against production.

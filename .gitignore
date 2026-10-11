@@ -9,3 +9,8 @@ bastionwaf
 bastionwaf.exe
 coverage.out
 *.test
+node_modules/
+playwright-report/
+test-results/
+
+.pnpm-store/
