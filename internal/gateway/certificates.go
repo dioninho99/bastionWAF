@@ -152,7 +152,8 @@ func (a *App) tlsSettings() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"mode": c.Mode, "email": c.Email, "dnsProvider": c.DNSProvider, "domains": c.Domains, "dnsTokenConfigured": c.DNSToken != "", "restartRequired": true, "certificate": a.certificateStatus()}, nil
+	restart, known := a.tlsRestartRequired(c)
+	return map[string]any{"runtimeKnown": known, "mode": c.Mode, "email": c.Email, "dnsProvider": c.DNSProvider, "domains": c.Domains, "dnsTokenConfigured": c.DNSToken != "", "restartRequired": restart, "certificate": a.certificateStatus()}, nil
 }
 
 func (a *App) saveTLSSettings(mode, email, provider string, domains []string, token string) error {

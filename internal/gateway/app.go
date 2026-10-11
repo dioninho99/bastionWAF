@@ -75,6 +75,10 @@ type App struct {
 	oidc                  *oidcConfig
 	oidcPending           map[[32]byte]oidcPending
 	dataDir               string
+	runtimeMu             sync.RWMutex
+	activeTLS             [32]byte
+	tlsStartupKnown       bool
+	activeOIDC            [32]byte
 }
 
 func New(dir, password string) (*App, error) {
@@ -104,6 +108,7 @@ func New(dir, password string) (*App, error) {
 		a.users.Close()
 		return nil, settingsErr
 	}
+	a.activeOIDC = oidcFingerprint(oidcSaved)
 	issuer := strings.TrimSpace(oidcSaved.Issuer)
 	if issuer != "" {
 		a.oidc, err = setupOIDC(context.Background(), issuer, oidcSaved.ClientID, oidcSaved.ClientSecret, oidcSaved.RedirectURI, oidcSaved.AdminEnabled, oidcSaved.ProxyEnabled)

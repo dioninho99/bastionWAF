@@ -120,6 +120,7 @@ func run() error {
 			httpHandler = manager.HTTPHandler(httpHandler)
 		}
 	}
+	app.RecordTLSStartup(tlsConfig)
 	public := server(env("BASTION_HTTP_ADDR", ":8080"), httpHandler)
 	servers := []*http.Server{admin, public}
 	errs := make(chan error, 3)

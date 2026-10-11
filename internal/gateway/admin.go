@@ -159,9 +159,9 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 			apiError(w, 500, "OIDC settings unavailable")
 			return
 		}
+		s.RestartRequired = oidcFingerprint(s) != a.activeOIDC
 		s.SecretConfigured = s.ClientSecret != ""
 		s.ClientSecret = ""
-		s.RestartRequired = true
 		jsonReply(w, 200, s)
 	}))
 	mux.HandleFunc("PUT /api/oidc", adminOnly(func(w http.ResponseWriter, r *http.Request) {
@@ -189,9 +189,14 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 			apiError(w, 400, err.Error())
 			return
 		}
+		settings, err = a.oidcSettings(r.Context())
+		if err != nil {
+			apiError(w, 500, "OIDC settings unavailable")
+			return
+		}
+		settings.RestartRequired = oidcFingerprint(settings) != a.activeOIDC
 		settings.ClientSecret = ""
 		settings.SecretConfigured = body.ClientSecret != ""
-		settings.RestartRequired = true
 		jsonReply(w, 200, settings)
 	}))
 	mux.HandleFunc("GET /api/tls", adminOnly(func(w http.ResponseWriter, r *http.Request) {
