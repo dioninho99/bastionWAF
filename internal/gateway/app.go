@@ -34,6 +34,7 @@ type routeRuntime struct {
 	threshold    int
 	maxBodyBytes int64
 	rateLimit    int
+	access       accessPolicy
 }
 type upstreamTarget struct {
 	url            *url.URL
@@ -45,8 +46,10 @@ type upstreamTarget struct {
 	lastCheck      time.Time
 }
 type snapshot struct {
-	config Config
-	routes []*routeRuntime
+	config   Config
+	routes   []*routeRuntime
+	access   accessPolicy
+	internal []netip.Prefix
 }
 type App struct {
 	state                 atomic.Pointer[snapshot]
@@ -74,6 +77,8 @@ type App struct {
 	users                 *sql.DB
 	oidc                  *oidcConfig
 	oidcPending           map[[32]byte]oidcPending
+	country               countryLookup
+	closeGeoIP            func()
 	dataDir               string
 	runtimeMu             sync.RWMutex
 	activeTLS             [32]byte
@@ -120,6 +125,11 @@ func New(dir, password string) (*App, error) {
 			a.oidc.RoleClaim = oidcSaved.RoleClaim
 		}
 	}
+	a.country, a.closeGeoIP, err = configuredGeoIP()
+	if err != nil {
+		a.users.Close()
+		return nil, err
+	}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)
 	a.transport = http.DefaultTransport.(*http.Transport).Clone()
 	a.transport.Proxy = nil
@@ -158,6 +168,10 @@ func New(dir, password string) (*App, error) {
 	if e != nil {
 		return nil, e
 	}
+	// Fail closed: never start with configured geoblocking silently disabled.
+	if a.country == nil && usesGeoblocking(c) {
+		return nil, errGeoIPMissing
+	}
 	s, e := compile(c, allowPrivate)
 	if e != nil {
 		return nil, e
@@ -183,6 +197,7 @@ func (a *App) Close() {
 	a.transport.CloseIdleConnections()
 	a.Events.close()
 	a.users.Close()
+	a.closeGeoIP()
 }
 func (a *App) Config() Config { return a.state.Load().config }
 func (a *App) HostAllowed(host string) bool {
@@ -197,7 +212,10 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 	if err := validate(c, allowPrivate); err != nil {
 		return nil, err
 	}
-	s := &snapshot{config: c}
+	s := &snapshot{config: c, access: newAccessPolicy(c.DenyCIDRs, c.AllowCIDRs, c.GeoDenyCountries, c.GeoAllowCountries, ""), internal: mustPrefixes(c.InternalCIDRs)}
+	if len(s.internal) == 0 {
+		s.internal = mustPrefixes(defaultInternalCIDRs)
+	}
 	// Share one immutable engine between routes with the same exclusion set.
 	engines := map[string]coraza.WAF{}
 	for _, r := range c.Routes {
@@ -222,7 +240,7 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 		if r.RateLimit != 0 {
 			rateLimit = r.RateLimit
 		}
-		rt := &routeRuntime{config: r, mode: mode, paranoia: paranoia, threshold: threshold, maxBodyBytes: maxBodyBytes, rateLimit: rateLimit}
+		rt := &routeRuntime{config: r, mode: mode, paranoia: paranoia, threshold: threshold, maxBodyBytes: maxBodyBytes, rateLimit: rateLimit, access: newAccessPolicy(r.DenyCIDRs, r.AllowCIDRs, r.GeoDenyCountries, r.GeoAllowCountries, r.Access)}
 		for _, raw := range r.Upstreams {
 			u, _ := url.Parse(raw)
 			rt.targets = append(rt.targets, &upstreamTarget{url: u})
@@ -265,6 +283,9 @@ func (a *App) Update(c Config, revision int64) error {
 	}
 	c.Revision = revision + 1
 	normalize(&c)
+	if a.country == nil && usesGeoblocking(c) {
+		return errGeoIPMissing
+	}
 	next, err := compile(c, a.allowPrivateUpstreams)
 	if err != nil {
 		return err

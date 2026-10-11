@@ -23,7 +23,9 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - Blocking/Detection Only, paranoia levels 1–4, anomaly threshold, and targeted CRS exclusions per route.
 - Custom path, query-string, header, body, User-Agent, and method rules using bounded literal case-insensitive substrings; rules can block or log before forwarding. OWASP CRS remains the primary SQL injection, XSS, traversal, and command-injection detector.
 - Custom rules can be tagged with an OWASP Top 10:2025 category (A01–A10). The WAF protection page shows a configuration coverage view for access control, misconfiguration, supply-chain, cryptography, injection, design, authentication, integrity, logging, and exceptional-condition controls. This is an operational mapping, not a certification.
-- IPv4/IPv6 CIDR deny list and optional allow list. Deny rules take precedence; allowed clients still pass through the WAF.
+- IPv4/IPv6 CIDR deny list (blacklist) and optional allow list (whitelist), globally and per route. Deny rules take precedence; a route list can only narrow the global policy, and allowed clients still pass through the WAF.
+- Per-route reachability: **internal and external**, **internal only**, or **external only**. Internal clients default to RFC 1918, 100.64.0.0/10, loopback, link-local, and IPv6 ULA ranges; the WAF protection page can replace these with your own networks. Classification uses the TCP peer address, so it only works when NAT in front of Bastion preserves client IPs.
+- Geoblocking by ISO country code (deny list and optional allow list), globally and per route, using a MaxMind-compatible country database (`BASTION_GEOIP_DB`). Internal clients are never geoblocked; with an allow list, public addresses without a known country are rejected. Event entries record the client country. Configuration containing geoblocking is rejected—and startup fails—while no database is loaded, so geoblocking is never silently disabled.
 - Fixed-window per-IP/per-route rate limiting, body limits, timeouts, connection limits, and bounded inspection buffers.
 - Each route may override WAF mode, paranoia, anomaly threshold, rate/body limits, allowed methods, and denied bot user-agent patterns. Empty/zero overrides inherit the global setting.
 - Routes can enforce an allowlist of request media types, require valid `Content-Type` headers for body methods, and add browser security response headers (`nosniff`, Referrer-Policy, Permissions-Policy, CSP frame protection, and conditional HSTS).
@@ -115,6 +117,18 @@ BASTION_TLS_KEY=/certs/privkey.pem
 ```
 
 Restart the container. The certificate must cover every domain in use. Manual certificates require a restart after renewal. Without ACME or PEM files, the proxy remains HTTP-only and the published 443 port has no listener.
+
+## Geoblocking
+
+Download a country database in MaxMind DB format, for example the free [DB-IP IP to Country Lite](https://db-ip.com/db/download/ip-to-country-lite) (CC BY 4.0) or MaxMind GeoLite2-Country (free account required):
+
+```sh
+mkdir -p geoip
+curl -fsSL "https://download.db-ip.com/free/dbip-country-lite-$(date +%Y-%m).mmdb.gz" | gunzip > geoip/dbip-country-lite.mmdb
+chmod 644 geoip/dbip-country-lite.mmdb
+```
+
+Set `BASTION_GEOIP_DB=/geoip/dbip-country-lite.mmdb` in `.env` and run `docker compose up -d`. Then configure blocked or allowed countries under **WAF protection → Geoblocking** or per proxy host. The database is read at startup; refresh it monthly and restart the container.
 
 ## Operating behavior and limits
 

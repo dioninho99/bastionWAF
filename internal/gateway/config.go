@@ -23,6 +23,9 @@ type Config struct {
 	ResponseInspection bool     `json:"responseInspection"`
 	DenyCIDRs          []string `json:"denyCIDRs"`
 	AllowCIDRs         []string `json:"allowCIDRs"`
+	InternalCIDRs      []string `json:"internalCIDRs"`
+	GeoDenyCountries   []string `json:"geoDenyCountries"`
+	GeoAllowCountries  []string `json:"geoAllowCountries"`
 	Routes             []Route  `json:"routes"`
 	Rules              []Rule   `json:"rules"`
 }
@@ -46,6 +49,11 @@ type Route struct {
 	RequireContentType  bool     `json:"requireContentType,omitempty"`
 	SecurityHeaders     bool     `json:"securityHeaders,omitempty"`
 	OIDCProtected       bool     `json:"oidcProtected,omitempty"`
+	Access              string   `json:"access,omitempty"`
+	DenyCIDRs           []string `json:"denyCIDRs,omitempty"`
+	AllowCIDRs          []string `json:"allowCIDRs,omitempty"`
+	GeoDenyCountries    []string `json:"geoDenyCountries,omitempty"`
+	GeoAllowCountries   []string `json:"geoAllowCountries,omitempty"`
 }
 type Rule struct {
 	ID       string `json:"id"`
@@ -58,7 +66,7 @@ type Rule struct {
 }
 
 func DefaultConfig() Config {
-	return Config{Revision: 1, Mode: "blocking", Paranoia: 1, Threshold: 5, MaxBodyBytes: 2 << 20, RateLimit: 120, DenyCIDRs: []string{}, AllowCIDRs: []string{}, Routes: []Route{}, Rules: []Rule{}}
+	return Config{Revision: 1, Mode: "blocking", Paranoia: 1, Threshold: 5, MaxBodyBytes: 2 << 20, RateLimit: 120, DenyCIDRs: []string{}, AllowCIDRs: []string{}, InternalCIDRs: []string{}, GeoDenyCountries: []string{}, GeoAllowCountries: []string{}, Routes: []Route{}, Rules: []Rule{}}
 }
 
 func normalize(c *Config) {
@@ -73,6 +81,15 @@ func normalize(c *Config) {
 	}
 	if c.AllowCIDRs == nil {
 		c.AllowCIDRs = []string{}
+	}
+	if c.InternalCIDRs == nil {
+		c.InternalCIDRs = []string{}
+	}
+	if c.GeoDenyCountries == nil {
+		c.GeoDenyCountries = []string{}
+	}
+	if c.GeoAllowCountries == nil {
+		c.GeoAllowCountries = []string{}
 	}
 	for i := range c.Routes {
 		if c.Routes[i].ExcludedRuleIDs == nil {
@@ -105,13 +122,17 @@ func validate(c Config, allowPrivate bool) error {
 	if c.MaxBodyBytes < 1024 || c.MaxBodyBytes > 32<<20 || c.RateLimit < 1 || c.RateLimit > 100000 {
 		return errors.New("body limit: 1 KiB–32 MiB; rate limit: 1–100000/min")
 	}
-	if len(c.Routes) > 100 || len(c.Rules) > 200 || len(c.DenyCIDRs)+len(c.AllowCIDRs) > 1000 {
+	if len(c.Routes) > 100 || len(c.Rules) > 200 || len(c.DenyCIDRs)+len(c.AllowCIDRs) > 1000 || len(c.InternalCIDRs) > 100 {
 		return errors.New("too many configuration entries")
 	}
-	for _, s := range append(append([]string{}, c.DenyCIDRs...), c.AllowCIDRs...) {
-		if _, e := netip.ParsePrefix(s); e != nil {
-			return fmt.Errorf("invalid CIDR: %s", s)
-		}
+	if e := validateCIDRs(append(append(append([]string{}, c.DenyCIDRs...), c.AllowCIDRs...), c.InternalCIDRs...), "global"); e != nil {
+		return e
+	}
+	if e := validateCountries(c.GeoDenyCountries, "global geoblocking"); e != nil {
+		return e
+	}
+	if e := validateCountries(c.GeoAllowCountries, "global geoblocking"); e != nil {
+		return e
 	}
 	ids, bindings := map[string]bool{}, map[string]bool{}
 	for _, r := range c.Routes {
@@ -187,6 +208,21 @@ func validate(c Config, allowPrivate bool) error {
 			if _, err := regexp.Compile("(?i:" + pattern + ")"); err != nil {
 				return fmt.Errorf("invalid bot user-agent pattern: %w", err)
 			}
+		}
+		if r.Access != "" && r.Access != "any" && r.Access != "internal" && r.Access != "external" {
+			return errors.New("route access must be any, internal, or external")
+		}
+		if len(r.DenyCIDRs)+len(r.AllowCIDRs) > 256 {
+			return errors.New("a maximum of 256 IP entries is supported per route")
+		}
+		if e := validateCIDRs(append(append([]string{}, r.DenyCIDRs...), r.AllowCIDRs...), "route "+r.Name); e != nil {
+			return e
+		}
+		if e := validateCountries(r.GeoDenyCountries, "route "+r.Name+" geoblocking"); e != nil {
+			return e
+		}
+		if e := validateCountries(r.GeoAllowCountries, "route "+r.Name+" geoblocking"); e != nil {
+			return e
 		}
 		if len(r.AllowedContentTypes) > 16 {
 			return errors.New("a maximum of 16 allowed content types is supported per route")

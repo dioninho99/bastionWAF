@@ -23,11 +23,13 @@ services:
       BASTION_ACME_DOMAINS: ${BASTION_ACME_DOMAINS:-}
       BASTION_TLS_CERT: ${BASTION_TLS_CERT:-}
       BASTION_TLS_KEY: ${BASTION_TLS_KEY:-}
+      BASTION_GEOIP_DB: ${BASTION_GEOIP_DB:-}
     secrets:
       - admin_password
     volumes:
       - bastion_data:/data
       - ./certs:/certs:ro
+      - ./geoip:/geoip:ro
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777

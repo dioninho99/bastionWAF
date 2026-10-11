@@ -4,6 +4,7 @@
 data
 secrets
 certs
+geoip
 .env
 *.exe
 coverage.out

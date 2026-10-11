@@ -3,6 +3,7 @@
 data/
 secrets/
 certs/
+geoip/
 .env
 bastionwaf
 bastionwaf.exe

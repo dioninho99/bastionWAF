@@ -1,14 +1,15 @@
 module bastionwaf
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/corazawaf/coraza-coreruleset/v4 v4.25.0
 	github.com/corazawaf/coraza/v3 v3.8.1
 	github.com/coreos/go-oidc/v3 v3.17.0
+	github.com/oschwald/maxminddb-golang/v2 v2.7.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/oauth2 v0.30.0
-	golang.org/x/sync v0.22.0
+	golang.org/x/sync v0.23.0
 	modernc.org/sqlite v1.38.2
 )
 
@@ -34,7 +35,7 @@ require (
 	github.com/valllabh/ocsf-schema-golang v1.0.3 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/net v0.58.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/libc v1.66.3 // indirect
