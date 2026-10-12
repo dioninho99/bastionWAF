@@ -124,6 +124,9 @@ func (m *Manager) renewLoop(ctx context.Context, delay, retry, interval time.Dur
 		m.status.LastError = ""
 		if err != nil {
 			m.status.LastError = "Certificate request failed. Check DNS credentials, domain permissions and connectivity; see server logs for details."
+			if errors.Is(err, errDNSPropagation) {
+				m.status.LastError = errDNSPropagation.Error()
+			}
 			m.status.NextAttempt = time.Now().Add(backoff).UTC()
 		} else {
 			m.status.LastSuccess = time.Now().UTC()
@@ -199,6 +202,9 @@ func (m *Manager) obtain(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if auth.Status == acme.StatusValid {
+			continue
+		}
 		challenge := findDNSChallenge(auth.Challenges)
 		if challenge == nil {
 			return fmt.Errorf("ACME authorization for %s has no DNS-01 challenge", auth.Identifier.Value)
@@ -216,15 +222,26 @@ func (m *Manager) obtain(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if _, err = m.client.Accept(ctx, challenge); err != nil {
-			_ = m.dns.deleteTXT(ctx, zoneID, recordID)
+		err = func() error {
+			// Cleanup also needs to work after the issuance context expires.
+			defer func() {
+				cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				if cleanupErr := m.dns.deleteTXT(cleanup, zoneID, recordID); cleanupErr != nil {
+					slog.Warn("ACME DNS challenge cleanup failed", "error", cleanupErr)
+				}
+			}()
+			slog.Info("Waiting for ACME DNS proof to become publicly visible", "name", recordName)
+			if err := waitDNSPropagation(ctx, recordName, challengeRecord); err != nil {
+				return err
+			}
+			if _, err := m.client.Accept(ctx, challenge); err != nil {
+				return err
+			}
+			_, err := m.client.WaitAuthorization(ctx, auth.URI)
 			return err
-		}
-		if _, err = m.client.WaitAuthorization(ctx, auth.URI); err != nil {
-			_ = m.dns.deleteTXT(ctx, zoneID, recordID)
-			return err
-		}
-		if err := m.dns.deleteTXT(ctx, zoneID, recordID); err != nil {
+		}()
+		if err != nil {
 			return err
 		}
 	}

@@ -229,3 +229,11 @@ must be applied with a restart first. CA rate limits still apply. Automatic chec
 request renewal only within 30 days of expiry. HTTP-01 uses autocert's automatic
 renewal; manually uploaded certificates must be replaced and activated by restart.
 Worker timestamps reset on restart; validity dates come from the certificate.
+
+Before submitting a DNS-01 challenge to the certificate authority, Bastion waits
+up to three minutes for the exact TXT proof to appear through both public DNS
+resolvers `1.1.1.1` and `8.8.8.8`. Allow outbound UDP/TCP port 53 to these resolvers
+from the container. Lookup errors and stale TXT values are retried every five
+seconds; a timeout leaves validation unsubmitted and reports a DNS visibility
+error in the certificate dashboard. Challenge cleanup has its own bounded timeout
+so temporary TXT records can be removed even after the issuance attempt expires.
