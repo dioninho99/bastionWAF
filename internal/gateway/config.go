@@ -14,6 +14,8 @@ import (
 )
 
 type Config struct {
+	TrustedProxyCIDRs  []string `json:"trustedProxyCIDRs,omitempty"`
+	GeoBypassCIDRs     []string `json:"geoBypassCIDRs,omitempty"`
 	Revision           int64    `json:"revision"`
 	Mode               string   `json:"mode"`
 	Paranoia           int      `json:"paranoia"`
@@ -30,6 +32,7 @@ type Config struct {
 	Rules              []Rule   `json:"rules"`
 }
 type Route struct {
+	GeoBypassCIDRs      []string `json:"geoBypassCIDRs,omitempty"`
 	ID                  string   `json:"id"`
 	Name                string   `json:"name"`
 	Host                string   `json:"host"`
@@ -70,6 +73,11 @@ func DefaultConfig() Config {
 }
 
 func normalize(c *Config) {
+	c.DenyCIDRs = normalizeIPList(c.DenyCIDRs)
+	c.AllowCIDRs = normalizeIPList(c.AllowCIDRs)
+	c.InternalCIDRs = normalizeIPList(c.InternalCIDRs)
+	c.GeoBypassCIDRs = normalizeIPList(c.GeoBypassCIDRs)
+	c.TrustedProxyCIDRs = normalizeIPList(c.TrustedProxyCIDRs)
 	if c.Routes == nil {
 		c.Routes = []Route{}
 	}
@@ -92,6 +100,9 @@ func normalize(c *Config) {
 		c.GeoAllowCountries = []string{}
 	}
 	for i := range c.Routes {
+		c.Routes[i].DenyCIDRs = normalizeIPList(c.Routes[i].DenyCIDRs)
+		c.Routes[i].AllowCIDRs = normalizeIPList(c.Routes[i].AllowCIDRs)
+		c.Routes[i].GeoBypassCIDRs = normalizeIPList(c.Routes[i].GeoBypassCIDRs)
 		if c.Routes[i].ExcludedRuleIDs == nil {
 			c.Routes[i].ExcludedRuleIDs = []int{}
 		}
@@ -113,6 +124,18 @@ var httpMethod = regexp.MustCompile(`^[A-Z][A-Z0-9-]{0,19}$`)
 var owaspCategory = regexp.MustCompile(`^A(0[1-9]|10)$`)
 
 func validate(c Config, allowPrivate bool) error {
+	if err := validateCIDRs(c.GeoBypassCIDRs, "global country exceptions"); err != nil {
+		return err
+	}
+	if err := validateCIDRs(c.TrustedProxyCIDRs, "trusted proxies"); err != nil {
+		return err
+	}
+	for _, value := range c.TrustedProxyCIDRs {
+		p, _ := netip.ParsePrefix(value)
+		if p.Bits() == 0 {
+			return errors.New("trusted proxies must not include every address")
+		}
+	}
 	if c.Mode != "blocking" && c.Mode != "detection" {
 		return errors.New("mode must be blocking or detection")
 	}
@@ -136,6 +159,9 @@ func validate(c Config, allowPrivate bool) error {
 	}
 	ids, bindings := map[string]bool{}, map[string]bool{}
 	for _, r := range c.Routes {
+		if err := validateCIDRs(r.GeoBypassCIDRs, "route country exceptions"); err != nil {
+			return err
+		}
 		if !identifier.MatchString(r.ID) || ids[r.ID] {
 			return errors.New("route ID is invalid or duplicated")
 		}

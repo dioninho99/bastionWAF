@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -127,8 +128,9 @@ func New(dir, password string) (*App, error) {
 	}
 	a.country, a.closeGeoIP, err = configuredGeoIP()
 	if err != nil {
-		a.users.Close()
-		return nil, err
+		slog.Error("GeoIP unavailable; dashboard remains available", "error", err)
+		a.country = nil
+		a.closeGeoIP = func() {}
 	}
 	a.bodyMemory = semaphore.NewWeighted(256 << 20)
 	a.transport = http.DefaultTransport.(*http.Transport).Clone()
@@ -167,10 +169,6 @@ func New(dir, password string) (*App, error) {
 	c, e := loadConfig(a.configPath, allowPrivate)
 	if e != nil {
 		return nil, e
-	}
-	// Fail closed: never start with configured geoblocking silently disabled.
-	if a.country == nil && usesGeoblocking(c) {
-		return nil, errGeoIPMissing
 	}
 	s, e := compile(c, allowPrivate)
 	if e != nil {
@@ -216,6 +214,7 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 	if len(s.internal) == 0 {
 		s.internal = mustPrefixes(defaultInternalCIDRs)
 	}
+	s.access.geoBypass = mustPrefixes(c.GeoBypassCIDRs)
 	// Share one immutable engine between routes with the same exclusion set.
 	engines := map[string]coraza.WAF{}
 	for _, r := range c.Routes {
@@ -270,6 +269,7 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 			engines[cacheKey] = waf
 		}
 		rt.waf = waf
+		rt.access.geoBypass = mustPrefixes(r.GeoBypassCIDRs)
 		s.routes = append(s.routes, rt)
 	}
 	sort.SliceStable(s.routes, func(i, j int) bool { return len(s.routes[i].config.Path) > len(s.routes[j].config.Path) })
