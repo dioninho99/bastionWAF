@@ -65,3 +65,28 @@ test('management forms remain usable on a narrow viewport',async ({page})=>{
  }
  await expect(page.locator('#logout')).toBeVisible();
 });
+test('IP exceptions and trusted proxies survive save and reload',async ({page})=>{
+ await login(page);
+ await page.getByRole('link',{name:'WAF protection',exact:true}).click();
+ await page.getByLabel('IP exceptions to country rules',{exact:true}).fill('192.0.2.20');
+ await page.getByLabel('Trusted proxy IPs or networks',{exact:true}).fill('10.0.0.5');
+ await page.getByRole('button',{name:'Save access control',exact:true}).click();
+ await expect(page.locator('#toast')).toBeVisible();
+ await page.reload();
+ await expect(page.getByLabel('IP exceptions to country rules',{exact:true})).toHaveValue('192.0.2.20/32');
+ await expect(page.getByLabel('Trusted proxy IPs or networks',{exact:true})).toHaveValue('10.0.0.5/32');
+ await page.getByRole('link',{name:/^Proxy Hosts/}).click();
+ await page.getByRole('button',{name:'Add proxy host',exact:true}).click();
+ const dialog=page.getByRole('dialog');
+ await dialog.getByLabel('Application name').fill('Access test');
+ await dialog.getByLabel('Domain',{exact:true}).fill('access.example.com');
+ await dialog.getByLabel('Backend addresses',{exact:false}).fill('http://93.184.216.34');
+ await dialog.getByLabel('IP whitelist',{exact:true}).fill('2001:db8::1');
+ await dialog.getByLabel('IP exceptions to country rules',{exact:true}).fill('2001:db8::1');
+ await dialog.getByRole('button',{name:'Save',exact:true}).click();
+ await expect(dialog).not.toBeVisible();
+ await page.getByRole('row').filter({hasText:'Access test'}).getByRole('button',{name:'Edit',exact:true}).click();
+ await expect(dialog.getByLabel('IP exceptions to country rules',{exact:true})).toHaveValue('2001:db8::1/128');
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
+});

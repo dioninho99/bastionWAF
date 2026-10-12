@@ -25,7 +25,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - Custom rules can be tagged with an OWASP Top 10:2025 category (A01–A10). The WAF protection page shows a configuration coverage view for access control, misconfiguration, supply-chain, cryptography, injection, design, authentication, integrity, logging, and exceptional-condition controls. This is an operational mapping, not a certification.
 - IPv4/IPv6 CIDR deny list (blacklist) and optional allow list (whitelist), globally and per route. Deny rules take precedence; a route list can only narrow the global policy, and allowed clients still pass through the WAF.
 - Per-route reachability: **internal and external**, **internal only**, or **external only**. Internal clients default to RFC 1918, 100.64.0.0/10, loopback, link-local, and IPv6 ULA ranges; the WAF protection page can replace these with your own networks. Classification uses the TCP peer address, so it only works when NAT in front of Bastion preserves client IPs.
-- Geoblocking by ISO country code (deny list and optional allow list), globally and per route, using a MaxMind-compatible country database (`BASTION_GEOIP_DB`). Internal clients are never geoblocked; with an allow list, public addresses without a known country are rejected. Event entries record the client country. Configuration containing geoblocking is rejected—and startup fails—while no database is loaded, so geoblocking is never silently disabled.
+- Geoblocking by ISO country code (deny list and optional allow list), globally and per route, using a MaxMind-compatible country database (`BASTION_GEOIP_DB`). Internal clients are never geoblocked; with an allow list, public addresses without a known country are rejected. Event entries record the client country. New configuration containing geoblocking is rejected while no database is loaded. If the database is missing or invalid on restart, the dashboard remains available and public requests requiring country checks receive HTTP 503. Restore the database and restart, or remove the country rules through direct admin access.
 - Fixed-window per-IP/per-route rate limiting, body limits, timeouts, connection limits, and bounded inspection buffers.
 - Each route may override WAF mode, paranoia, anomaly threshold, rate/body limits, allowed methods, and denied bot user-agent patterns. Empty/zero overrides inherit the global setting.
 - Routes can enforce an allowlist of request media types, require valid `Content-Type` headers for body methods, and add browser security response headers (`nosniff`, Referrer-Policy, Permissions-Policy, CSP frame protection, and conditional HSTS).
@@ -141,7 +141,7 @@ Set `BASTION_GEOIP_DB=/geoip/dbip-country-lite.mmdb` in `.env` and run `docker c
 - **Alerts:** set `BASTION_ALERT_WEBHOOK_URL` to receive a JSON POST when an active health check changes a target between reachable and unhealthy. Delivery is asynchronous, bounded to 32 queued alerts, and uses a three-second timeout. No request payloads, cookies, credentials, or WAF match data are sent.
 - **Accounts:** one administrator; no roles, SSO, or MFA. Admin APIs and backend access are highly privileged.
 - **Logs:** query strings, bodies, authorization headers, and Coraza match data are not retained. Paths may still contain application-sensitive values. The audit file is limited to 10 MiB plus one rotation.
-- **Not included:** GeoIP/ASN rules, bot challenges/CAPTCHA, API-schema validation, automatic tuning, threat-intelligence feeds, caching, HTTP/3, and GUI certificate management.
+- **Not included:** ASN rules, bot challenges/CAPTCHA, API-schema validation, automatic tuning, threat-intelligence feeds, caching, HTTP/3, and GUI certificate management.
 
 ## Monitoring and backup
 
@@ -203,3 +203,11 @@ and 18091 with temporary data and test credentials. It never uses existing
 `BASTION_*` environment settings. Failed tests retain a Playwright trace and HTML
 report; CI uploads these as artifacts for seven days. Traces contain test-only
 credentials and must not be collected against production.
+
+### IP exceptions and trusted proxies
+
+Global and per-host IP whitelists restrict access; they do not bypass country rules, WAF inspection, or authentication. Separate **IP exceptions to country rules** skip country checks only: a global exception applies to all hosts, while a host exception cannot override a global country restriction. IP blacklists always win. Individual IPv4/IPv6 addresses are accepted and normalized to /32 or /128.
+
+By default Bastion uses the socket peer address and ignores forwarded client-IP headers. Behind a reverse proxy, configure its exact address under **WAF protection → Trusted proxy IPs or networks**. Only trust proxies you control that overwrite or append `X-Forwarded-For`. Bastion walks that chain from right to left to the first untrusted hop; malformed trusted chains are rejected. Never trust arbitrary clients. This resolved address is used for application access rules, rate limits, events, WAF inspection and upstream forwarding. The separate admin listener continues to use its directly connected peer.
+
+Keep direct management access available. Internal clients skip geoblocking according to the configured internal networks; an unconfigured private reverse proxy would otherwise make external visitors appear internal. GeoIP databases are read into memory at startup: replace the file and restart to activate updates. Geolocation is approximate and does not prove a visitor's physical location.

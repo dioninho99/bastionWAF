@@ -3,6 +3,7 @@ package gateway
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"net/netip"
 	"os"
 	"regexp"
@@ -18,11 +19,15 @@ var defaultInternalCIDRs = []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/
 var countryCode = regexp.MustCompile(`^[A-Z]{2}$`)
 
 // countryLookup resolves a client address to an ISO 3166-1 alpha-2 code; "" means unknown.
-type countryLookup func(netip.Addr) string
+type countryLookup func(netip.Addr) (string, error)
 
 // openGeoIP loads a MaxMind-compatible country database (GeoLite2-Country, DB-IP Country Lite, …).
 func openGeoIP(path string) (countryLookup, func(), error) {
-	db, err := maxminddb.Open(path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("BASTION_GEOIP_DB: %w", err)
+	}
+	db, err := maxminddb.OpenBytes(data)
 	if err != nil {
 		return nil, nil, fmt.Errorf("BASTION_GEOIP_DB: %w", err)
 	}
@@ -30,16 +35,21 @@ func openGeoIP(path string) (countryLookup, func(), error) {
 		db.Close()
 		return nil, nil, fmt.Errorf("BASTION_GEOIP_DB is not a valid MaxMind DB: %w", err)
 	}
-	lookup := func(ip netip.Addr) string {
+	databaseType := strings.ToLower(db.Metadata.DatabaseType)
+	if !strings.Contains(databaseType, "country") && !strings.Contains(databaseType, "city") {
+		db.Close()
+		return nil, nil, errors.New("BASTION_GEOIP_DB requires a Country or City database")
+	}
+	lookup := func(ip netip.Addr) (string, error) {
 		var record struct {
 			Country struct {
 				ISOCode string `maxminddb:"iso_code"`
 			} `maxminddb:"country"`
 		}
 		if err := db.Lookup(ip).Decode(&record); err != nil {
-			return ""
+			return "", err
 		}
-		return strings.ToUpper(record.Country.ISOCode)
+		return strings.ToUpper(record.Country.ISOCode), nil
 	}
 	return lookup, func() { db.Close() }, nil
 }
@@ -55,6 +65,7 @@ func configuredGeoIP() (countryLookup, func(), error) {
 // accessPolicy is the precompiled IP/geo policy of the global configuration or one route.
 type accessPolicy struct {
 	deny, allow           []netip.Prefix
+	geoBypass             []netip.Prefix
 	geoDeny, geoAllow     map[string]bool
 	geoConfigured         bool
 	internalOnly, extOnly bool
@@ -110,6 +121,9 @@ func checkAccess(global, route *accessPolicy, ip netip.Addr, internal bool, coun
 		return ""
 	}
 	for _, p := range []*accessPolicy{global, route} {
+		if prefixesContain(global.geoBypass, ip) || prefixesContain(p.geoBypass, ip) {
+			continue
+		}
 		if country != "" && p.geoDeny[country] {
 			return "geoblocking: country " + country + " is denied"
 		}
@@ -137,8 +151,11 @@ func validateCountries(list []string, scope string) error {
 	return nil
 }
 func validateCIDRs(list []string, scope string) error {
+	if len(list) > 1000 {
+		return fmt.Errorf("%s: too many networks", scope)
+	}
 	for _, s := range list {
-		if _, e := netip.ParsePrefix(s); e != nil {
+		if p, e := netip.ParsePrefix(s); e != nil || p.Addr().Is4In6() {
 			return fmt.Errorf("%s: invalid CIDR: %s", scope, s)
 		}
 	}
@@ -158,3 +175,49 @@ func usesGeoblocking(c Config) bool {
 }
 
 var errGeoIPMissing = errors.New("geoblocking requires a country database; set BASTION_GEOIP_DB to a MaxMind-compatible .mmdb file")
+
+func normalizeIPList(list []string) []string {
+	out := make([]string, len(list))
+	for i, value := range list {
+		value = strings.TrimSpace(value)
+		if ip, err := netip.ParseAddr(value); err == nil {
+			ip = ip.Unmap()
+			value = netip.PrefixFrom(ip, ip.BitLen()).String()
+		}
+		out[i] = value
+	}
+	return out
+}
+func proxyClientIP(r *http.Request, trusted []string) string {
+	prefixes := mustPrefixes(trusted)
+	peer := clientIP(r)
+	ip, err := netip.ParseAddr(peer)
+	if err != nil || !prefixesContain(prefixes, ip) {
+		return peer
+	}
+	raw := strings.Join(r.Header.Values("X-Forwarded-For"), ",")
+	if raw == "" {
+		return peer
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > 32 {
+		return "invalid forwarded client IP"
+	}
+	for i := len(parts) - 1; i >= 0; i-- {
+		ip, err = netip.ParseAddr(strings.TrimSpace(parts[i]))
+		if err != nil || ip.Zone() != "" {
+			return "invalid forwarded client IP"
+		}
+		ip = ip.Unmap()
+		if !prefixesContain(prefixes, ip) || i == 0 {
+			return ip.String()
+		}
+	}
+	return peer
+}
+func needsCountry(global, route *accessPolicy, ip netip.Addr, internal bool) bool {
+	if internal || prefixesContain(global.geoBypass, ip) {
+		return false
+	}
+	return global.geoConfigured || route.geoConfigured && !prefixesContain(route.geoBypass, ip)
+}

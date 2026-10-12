@@ -62,7 +62,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	s := a.state.Load()
 	c := s.config
-	ev := Event{ID: randomID(), Time: start, Client: clientIP(r), Host: hostOnly(r.Host), Method: r.Method, Path: r.URL.EscapedPath(), Status: 200, Action: "allowed", RuleIDs: []int{}}
+	ev := Event{ID: randomID(), Time: start, Client: proxyClientIP(r, c.TrustedProxyCIDRs), Host: hostOnly(r.Host), Method: r.Method, Path: r.URL.EscapedPath(), Status: 200, Action: "allowed", RuleIDs: []int{}}
 	if len(ev.Path) > 512 {
 		ev.Path = ev.Path[:512]
 	}
@@ -104,8 +104,17 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	internal := prefixesContain(s.internal, ip)
+	if a.country == nil && needsCountry(&s.access, &route.access, ip, internal) {
+		block(503, "GeoIP database unavailable")
+		return
+	}
 	if !internal && a.country != nil {
-		ev.Country = a.country(ip)
+		var lookupErr error
+		ev.Country, lookupErr = a.country(ip)
+		if lookupErr != nil && needsCountry(&s.access, &route.access, ip, internal) {
+			block(503, "GeoIP lookup failed")
+			return
+		}
 	}
 	if reason := checkAccess(&s.access, &route.access, ip, internal, ev.Country); reason != "" {
 		block(403, reason)
@@ -194,9 +203,9 @@ methodAllowed:
 			ev.Reason = "OWASP CRS match"
 		}
 	}()
-	host, port, _ := net.SplitHostPort(r.RemoteAddr)
+	_, port, _ := net.SplitHostPort(r.RemoteAddr)
 	p, _ := strconv.Atoi(port)
-	tx.ProcessConnection(host, p, "", 0)
+	tx.ProcessConnection(ev.Client, p, "", 0)
 	tx.ProcessURI(r.URL.RequestURI(), r.Method, r.Proto)
 	tx.SetServerName(ev.Host)
 	tx.AddRequestHeader("Host", r.Host)
@@ -302,6 +311,7 @@ methodAllowed:
 			pr.Out.Header.Del("X-Authenticated-User")
 			pr.Out.Header.Del("X-Authenticated-Role")
 			pr.SetXForwarded()
+			pr.Out.Header.Set("X-Forwarded-For", ev.Client)
 			pr.Out.Header.Set("X-Real-IP", ev.Client)
 			pr.Out.Header.Set("X-Request-ID", ev.ID)
 			if identity, ok := a.getSession(r); ok && identity.User != "" {
