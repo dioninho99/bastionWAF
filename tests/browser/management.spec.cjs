@@ -90,3 +90,24 @@ test('IP exceptions and trusted proxies survive save and reload',async ({page})=
  await page.setViewportSize({width:390,height:844});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
 });
+
+test('certificate dashboard reports validity and renewal without resetting setup',async({page})=>{
+ const now=Date.now();let running=false;let renews=0;
+ await page.route('**/api/tls',route=>route.fulfill({json:{mode:'dns01',runtimeKnown:true,restartRequired:false,email:'admin@example.test',domains:['example.test'],dnsTokenConfigured:true}}));
+ await page.route('**/api/tls/status',route=>route.fulfill({json:{mode:'dns01',enabled:true,canRenew:!running,failures:{},renewal:{running,lastAttempt:new Date(now-86400000).toISOString(),lastSuccess:new Date(now-86400000).toISOString(),nextAttempt:new Date(now+3600000).toISOString()},certificates:[{domain:'DNS-01 certificate',dnsNames:['example.test','*.example.test'],issuer:'CN=Test CA',notBefore:new Date(now-86400000).toISOString(),notAfter:new Date(now+60*86400000).toISOString(),fingerprint:'a'.repeat(64),state:'valid'}]}}));
+ await page.route('**/api/tls/renew',route=>{renews++;running=true;return route.fulfill({status:202,json:{status:'queued'}});});
+ await login(page);await page.getByRole('link',{name:'Certificates',exact:true}).click();
+
+ await expect(page.getByRole('heading',{name:'Certificate available'})).toBeVisible();
+ await expect(page.locator('.certificate-card')).toContainText('60 days');
+ await page.getByLabel('TLS mode',{exact:true}).selectOption('http01');
+ await page.getByLabel('ACME email').fill('unsaved@example.test');
+ page.on('dialog',dialog=>dialog.accept());
+ await page.getByRole('button',{name:'Renew certificate now'}).click();
+ await expect(page.getByRole('button',{name:'Request in progress…'})).toBeDisabled();
+ expect(renews).toBe(1);
+ await expect(page.getByLabel('ACME email')).toHaveValue('unsaved@example.test');
+ await page.setViewportSize({width:390,height:844});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:test.info().outputPath('certificate-dashboard.png'),fullPage:true});
+});

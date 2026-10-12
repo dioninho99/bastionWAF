@@ -87,6 +87,7 @@ func run() error {
 		return errors.New("BASTION_ACME_EMAIL is required for DNS-01 ACME")
 	}
 	tlsEnabled := cert != "" || email != ""
+	monitor := gateway.NewTLSMonitor(tlsConfig.Mode, tlsEnabled)
 	httpHandler := http.Handler(app)
 	var manager *autocert.Manager
 	var dnsManager *acmeclient.Manager
@@ -111,7 +112,10 @@ func run() error {
 			http.Redirect(w, r, "https://"+host+r.URL.RequestURI(), http.StatusPermanentRedirect)
 		})
 		if email != "" && dnsManager == nil {
-			manager = &autocert.Manager{Prompt: autocert.AcceptTOS, Email: email, Cache: autocert.DirCache(filepath.Join(data, "acme")), HostPolicy: func(ctx context.Context, host string) error {
+			cacheDir := filepath.Join(data, "acme")
+			cache := gateway.CertificateCache{Cache: autocert.DirCache(cacheDir), Monitor: monitor}
+			cache.LoadInventory(context.Background(), cacheDir)
+			manager = &autocert.Manager{Prompt: autocert.AcceptTOS, Email: email, Cache: cache, HostPolicy: func(ctx context.Context, host string) error {
 				if app.HostAllowed(host) {
 					return nil
 				}
@@ -120,6 +124,10 @@ func run() error {
 			httpHandler = manager.HTTPHandler(httpHandler)
 		}
 	}
+	if dnsManager != nil {
+		monitor.SetDNSManager(dnsManager)
+	}
+	app.SetTLSMonitor(monitor)
 	app.RecordTLSStartup(tlsConfig)
 	public := server(env("BASTION_HTTP_ADDR", ":8080"), httpHandler)
 	servers := []*http.Server{admin, public}
@@ -131,10 +139,28 @@ func run() error {
 		if manager != nil {
 			secure.TLSConfig = manager.TLSConfig()
 			secure.TLSConfig.MinVersion = tls.VersionTLS12
+			getCertificate := secure.TLSConfig.GetCertificate
+			secure.TLSConfig.GetCertificate = func(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				pair, err := getCertificate(hello)
+				if app.HostAllowed(hello.ServerName) && !strings.Contains(strings.Join(hello.SupportedProtos, ","), "acme-tls/1") {
+					monitor.Observe(hello.ServerName, pair, err)
+				}
+				return pair, err
+			}
 		}
 		if dnsManager != nil {
 			secure.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: dnsManager.GetCertificate}
 		}
+		if manager == nil && dnsManager == nil {
+			pair, loadErr := tls.LoadX509KeyPair(cert, key)
+			if loadErr != nil {
+				return loadErr
+			}
+			monitor.Observe("Manual certificate", &pair, nil)
+			secure.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{pair}}
+		}
+		// The manual certificate snapshot is exactly the pair served by this process.
+		cert, key = "", ""
 		servers = append(servers, secure)
 		go func() {
 			slog.Info("TLS proxy listening", "address", secure.Addr)
