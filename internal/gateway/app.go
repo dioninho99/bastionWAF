@@ -82,6 +82,7 @@ type App struct {
 	closeGeoIP            func()
 	dataDir               string
 	runtimeMu             sync.RWMutex
+	tlsMonitor            *TLSMonitor
 	activeTLS             [32]byte
 	tlsStartupKnown       bool
 	activeOIDC            [32]byte

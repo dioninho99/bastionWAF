@@ -30,6 +30,8 @@ type Manager struct {
 	cert    *tls.Certificate
 	cancel  context.CancelFunc
 	done    chan struct{}
+	wake    chan struct{}
+	status  RenewalStatus
 }
 
 func NewCloudflare(ctx context.Context, dir, email, token string, domains []string) (*Manager, error) {
@@ -48,7 +50,7 @@ func NewCloudflare(ctx context.Context, dir, email, token string, domains []stri
 	if len(normalized) == 0 {
 		return nil, errors.New("ACME DNS-01 requires at least one non-empty domain")
 	}
-	m := &Manager{client: &acme.Client{Key: key, DirectoryURL: directory}, dns: newCloudflare(token), email: email, domains: normalized, dir: dir, done: make(chan struct{})}
+	m := &Manager{client: &acme.Client{Key: key, DirectoryURL: directory}, dns: newCloudflare(token), email: email, domains: normalized, dir: dir, done: make(chan struct{}), wake: make(chan struct{}, 1)}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, err
 	}
@@ -85,15 +87,49 @@ func (m *Manager) renewLoop(ctx context.Context, delay, retry, interval time.Dur
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	backoff := retry
+	m.mu.Lock()
+	m.status.NextAttempt = time.Now().Add(delay).UTC()
+	m.mu.Unlock()
 	for {
+		manual := false
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+		case <-m.wake:
+			manual = true
 		}
+		if !manual && m.certificateFresh() {
+			m.mu.Lock()
+			m.status.NextAttempt = time.Now().Add(interval).UTC()
+			m.mu.Unlock()
+			timer.Reset(interval)
+			continue
+		}
+		m.mu.Lock()
+		select {
+		case <-m.wake:
+		default:
+		}
+		m.status.Queued = false
+		m.status.Running = true
+		m.status.LastAttempt = time.Now().UTC()
+		m.status.NextAttempt = time.Time{}
+		m.mu.Unlock()
 		attempt, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		err := obtain(attempt)
 		cancel()
+		m.mu.Lock()
+		m.status.Running = false
+		m.status.LastError = ""
+		if err != nil {
+			m.status.LastError = "Certificate request failed. Check DNS credentials, domain permissions and connectivity; see server logs for details."
+			m.status.NextAttempt = time.Now().Add(backoff).UTC()
+		} else {
+			m.status.LastSuccess = time.Now().UTC()
+			m.status.NextAttempt = time.Now().Add(interval).UTC()
+		}
+		m.mu.Unlock()
 		if ctx.Err() != nil {
 			return
 		}
@@ -126,12 +162,27 @@ func (m *Manager) loadCached() error {
 		return errors.New("cached ACME certificate is empty")
 	}
 	x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
-	if err != nil || time.Until(x509Cert.NotAfter) < 30*24*time.Hour {
+	if err != nil || time.Now().Before(x509Cert.NotBefore) || time.Now().After(x509Cert.NotAfter) {
 		return errors.New("cached ACME certificate expires soon")
+	}
+	for _, domain := range m.domains {
+		covered := false
+		for _, name := range x509Cert.DNSNames {
+			if strings.EqualFold(name, domain) {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return errors.New("cached certificate does not cover configured domains")
+		}
 	}
 	m.mu.Lock()
 	m.cert = &cert
 	m.mu.Unlock()
+	if time.Until(x509Cert.NotAfter) < 30*24*time.Hour {
+		return errors.New("cached certificate requires renewal")
+	}
 	return nil
 }
 
@@ -274,4 +325,47 @@ func findDNSChallenge(challenges []*acme.Challenge) *acme.Challenge {
 		}
 	}
 	return nil
+}
+
+// RenewalStatus reports worker progress without exposing provider secrets.
+type RenewalStatus struct {
+	Queued      bool      `json:"queued"`
+	Running     bool      `json:"running"`
+	LastAttempt time.Time `json:"lastAttempt"`
+	LastSuccess time.Time `json:"lastSuccess"`
+	NextAttempt time.Time `json:"nextAttempt"`
+	LastError   string    `json:"lastError,omitempty"`
+}
+
+func (m *Manager) Status() RenewalStatus { m.mu.RLock(); defer m.mu.RUnlock(); return m.status }
+
+// Renew schedules one request on the existing worker, preserving the active certificate.
+func (m *Manager) Renew() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	select {
+	case <-m.done:
+		return errors.New("certificate manager stopped")
+	default:
+	}
+	if m.status.Queued || m.status.Running || (!m.status.LastAttempt.IsZero() && time.Since(m.status.LastAttempt) < 5*time.Minute) {
+		return errors.New("a request is running or was attempted within the last five minutes")
+	}
+	select {
+	case m.wake <- struct{}{}:
+		m.status.Queued = true
+		return nil
+	default:
+		return errors.New("certificate request already queued")
+	}
+}
+
+func (m *Manager) certificateFresh() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.cert == nil || len(m.cert.Certificate) == 0 {
+		return false
+	}
+	c, err := x509.ParseCertificate(m.cert.Certificate[0])
+	return err == nil && time.Now().After(c.NotBefore) && time.Until(c.NotAfter) > 30*24*time.Hour
 }

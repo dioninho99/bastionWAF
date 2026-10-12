@@ -211,3 +211,21 @@ Global and per-host IP whitelists restrict access; they do not bypass country ru
 By default Bastion uses the socket peer address and ignores forwarded client-IP headers. Behind a reverse proxy, configure its exact address under **WAF protection → Trusted proxy IPs or networks**. Only trust proxies you control that overwrite or append `X-Forwarded-For`. Bastion walks that chain from right to left to the first untrusted hop; malformed trusted chains are rejected. Never trust arbitrary clients. This resolved address is used for application access rules, rate limits, events, WAF inspection and upstream forwarding. The separate admin listener continues to use its directly connected peer.
 
 Keep direct management access available. Internal clients skip geoblocking according to the configured internal networks; an unconfigured private reverse proxy would otherwise make external visitors appear internal. GeoIP databases are read into memory at startup: replace the file and restart to activate updates. Geolocation is approximate and does not prove a visitor's physical location.
+
+### Certificate dashboard
+
+The **Certificates** page shows runtime certificate metadata independently of the
+saved setup: issuer, DNS names, validity dates, age, days remaining and SHA-256
+fingerprint. `Loaded` means the running process has selected that certificate;
+HTTP-01 certificates found on disk are labelled `cached` until selected. This is
+local TLS status, not an external DNS/firewall or browser-trust probe. Status
+refreshes every five seconds without discarding edits to the setup form.
+
+Cloudflare DNS-01 also shows the last attempt, last success, next check/retry and
+request failures. **Renew certificate now** queues a background request using the
+active settings; the current certificate remains available. Concurrent requests
+and attempts within five minutes are rejected, and pending configuration changes
+must be applied with a restart first. CA rate limits still apply. Automatic checks
+request renewal only within 30 days of expiry. HTTP-01 uses autocert's automatic
+renewal; manually uploaded certificates must be replaced and activated by restart.
+Worker timestamps reset on restart; validity dates come from the certificate.

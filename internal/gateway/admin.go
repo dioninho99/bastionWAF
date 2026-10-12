@@ -207,6 +207,33 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 		}
 		jsonReply(w, 200, settings)
 	}))
+	mux.HandleFunc("GET /api/tls/status", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if a.tlsMonitor == nil {
+			apiError(w, 503, "TLS runtime status unavailable")
+			return
+		}
+		jsonReply(w, 200, a.tlsMonitor.Snapshot())
+	}))
+	mux.HandleFunc("POST /api/tls/renew", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if a.tlsMonitor == nil || a.tlsMonitor.renew == nil {
+			apiError(w, 409, "Manual renewal is available for active DNS-01 mode only")
+			return
+		}
+		c, err := a.LoadTLSConfiguration()
+		if err != nil {
+			apiError(w, 500, "TLS settings unavailable")
+			return
+		}
+		if pending, _ := a.tlsRestartRequired(c); pending {
+			apiError(w, 409, "Restart Bastion to apply saved TLS settings before renewing")
+			return
+		}
+		if err := a.tlsMonitor.renew(); err != nil {
+			apiError(w, 409, err.Error())
+			return
+		}
+		jsonReply(w, 202, map[string]string{"status": "queued"})
+	}))
 	mux.HandleFunc("PUT /api/tls", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		var body struct{ Mode, Email, DNSProvider, Domains, DNSToken string }
 		if err := readJSON(w, r, &body); err != nil {
