@@ -1,7 +1,7 @@
 const {test,expect}=require('@playwright/test');
 const {readFileSync}=require('node:fs');
 const records=Array.from({length:125},(_,i)=>({id:`request-${i}`,time:new Date(Date.now()-i*1000).toISOString(),host:'app.example.com',path:`/requests/${i}`,method:'GET',client:'192.0.2.1',country:'AT',action:i%2?'allowed':'blocked',status:i%2?200:403,reason:i%2?'':'OWASP CRS',ruleIds:i%2?[]:[942100],duration:1.2}));
-test('event pagination, pause, search, filtered export and responsive layout',async({page})=>{
+test('event pagination, pause, search, filtered export and responsive layout',async({page},testInfo)=>{
  page.on('pageerror',error=>{throw error});
  let events=records;
  await page.route('**/api/events',route=>route.fulfill({json:events}));
@@ -29,9 +29,9 @@ test('event pagination, pause, search, filtered export and responsive layout',as
  await page.getByLabel('Search events').fill('no-such-request');
  await expect(page.getByRole('heading',{name:'No matching events'})).toBeVisible();
  await page.getByRole('button',{name:'Clear filters'}).click();
- await page.screenshot({path:'/private/tmp/bastion-events-desktop.png',fullPage:true});
+ await page.screenshot({path:testInfo.outputPath('events-desktop.png'),fullPage:true});
  await page.setViewportSize({width:390,height:844});
- await page.screenshot({path:'/private/tmp/bastion-events-mobile.png',fullPage:true});
+ await page.screenshot({path:testInfo.outputPath('events-mobile.png'),fullPage:true});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBeTruthy();
  await page.getByRole('button',{name:'Resume live updates'}).click();
  await expect(page.getByRole('heading',{name:'No events yet'})).toBeVisible();
