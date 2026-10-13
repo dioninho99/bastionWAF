@@ -198,7 +198,7 @@ Set `BASTION_GEOIP_DB=/geoip/dbip-country-lite.mmdb` in `.env` and run `docker c
 - **Direct edge operation:** client IP comes from the TCP peer. Forwarded, `X-Forwarded-*`, and `X-Real-IP` headers are discarded and rebuilt. There is no trusted-proxy/CDN support.
 - **Uploads:** default 2 MiB per request, configurable from 1 KiB to 32 MiB. The complete request is buffered before forwarding. Compressed request bodies are rejected with 415.
 - **Response inspection:** disabled by default. When enabled, inspectable MIME types are limited to 1 MiB; larger or compressed inspectable responses are rejected with 502. This is not malware scanning. WebSocket frames and gRPC messages are not inspected.
-- **Capacity:** at most 128 concurrent proxy requests/upgrades and a conservative 256 MiB payload-buffer reservation budget. Exhaustion returns 503. This is not volumetric DDoS protection.
+- **Capacity:** at most 128 concurrent HTTP requests plus 128 established upgraded connections, and a conservative 256 MiB payload-buffer reservation budget. Request and inspected response buffers reserve capacity incrementally as they grow (including an allowance for copies); empty bodies reserve no payload capacity. Successful upgrades release their inspection buffers and HTTP slot after the handshake. The payload budget is not a total process-memory limit. Exhaustion returns 503. This is not volumetric DDoS protection.
 - **Backends:** active HEAD checks run every 30 seconds by default, with a two-second timeout and at most 16 concurrent probes. Configure `BASTION_UPSTREAM_HEALTH_INTERVAL` between 5 and 300 seconds. HTTP 2xx–499 responses count as reachable; 5xx responses and transport errors trigger cooldown. There are no automatic retries, session affinity, or URL rewrites. Private HTTP(S) backends require the explicit SSRF opt-in. Bastion is not a forward proxy.
 - **Alerts:** set `BASTION_ALERT_WEBHOOK_URL` to receive a JSON POST when an active health check changes a target between reachable and unhealthy. Delivery is asynchronous, bounded to 32 queued alerts, and uses a three-second timeout. No request payloads, cookies, credentials, or WAF match data are sent.
 - **Accounts:** one administrator; no roles, SSO, or MFA. Admin APIs and backend access are highly privileged.
@@ -209,7 +209,20 @@ Set `BASTION_GEOIP_DB=/geoip/dbip-country-lite.mmdb` in `.env` and run `docker c
 
 Health check: `GET /healthz` on the admin port, without login. It checks the process/listeners, not backend health. Authenticated `GET /api/upstreams` exposes runtime target health, failure counts, cooldowns, and the last observed status/error; `/api/upstreams/status` provides the same focused status view.
 
-Prometheus: `GET /metrics` with an admin session or a dedicated metrics token from `BASTION_METRICS_TOKEN`. The admin password is never accepted as a bearer token. Generate at least 32 random characters, keep the endpoint on the trusted management network, and rotate the token by restarting Bastion.
+Prometheus: `GET /metrics` with an admin session or a dedicated metrics token from `BASTION_METRICS_TOKEN`. Metrics include `bastion_active_requests`, `bastion_active_upgrades`,
+`bastion_inspection_reserved_bytes`, and `bastion_inspection_budget_bytes` gauges.
+`bastion_request_duration_seconds` is a cumulative histogram in seconds, measured
+through request completion (including the lifetime of upgraded connections).
+`bastion_request_failures_total{cause="..."}` separates `request_capacity`,
+`inspection_capacity`, `upgrade_capacity`, `upstream_transport`, `upstream_status`
+(502/503/504), `response_inspection`, `request_body` (read errors), and `geoip`.
+Labels use a fixed set of causes; client IPs, URLs and request IDs are not labels.
+Local capacity and response-inspection failures do not put a backend into cooldown.
+The existing counters remain available; the legacy `bastion_upstream_errors_total`
+counts all completed 5xx responses, including local failures. Use the cause counters
+to distinguish backend failures from gateway failures.
+
+The admin password is never accepted as a bearer token. Generate at least 32 random characters, keep the endpoint on the trusted management network, and rotate the token by restarting Bastion.
 
 ```sh
 docker compose logs -f --tail=100 bastion

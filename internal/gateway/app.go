@@ -68,6 +68,9 @@ type App struct {
 	transport             *http.Transport
 	slots                 chan struct{}
 	bodyMemory            *semaphore.Weighted
+	inspectionBytes       atomic.Int64
+	upgradeSlots          chan struct{}
+	runtimeMetrics        runtimeMetrics
 	allowPrivateUpstreams bool
 	healthInterval        time.Duration
 	healthStop            chan struct{}
@@ -133,7 +136,8 @@ func New(dir, password string) (*App, error) {
 		a.country = nil
 		a.closeGeoIP = func() {}
 	}
-	a.bodyMemory = semaphore.NewWeighted(256 << 20)
+	a.bodyMemory = semaphore.NewWeighted(inspectionBudget)
+	a.upgradeSlots = make(chan struct{}, 128)
 	a.transport = http.DefaultTransport.(*http.Transport).Clone()
 	a.transport.Proxy = nil
 	a.transport.ResponseHeaderTimeout = 20 * time.Second

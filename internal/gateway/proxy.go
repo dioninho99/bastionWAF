@@ -60,6 +60,8 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	start := time.Now()
+	cause := ""
+	defer func() { a.runtimeMetrics.observe(time.Since(start), cause) }()
 	s := a.state.Load()
 	c := s.config
 	ev := Event{ID: randomID(), Time: start, Client: proxyClientIP(r, c.TrustedProxyCIDRs), Host: hostOnly(r.Host), Method: r.Method, Path: r.URL.EscapedPath(), Status: 200, Action: "allowed", RuleIDs: []int{}}
@@ -74,10 +76,17 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ev.Reason = reason
 		deny(w, code, ev.ID)
 	}
+	requestSlot := false
+	defer func() {
+		if requestSlot {
+			<-a.slots
+		}
+	}()
 	select {
 	case a.slots <- struct{}{}:
-		defer func() { <-a.slots }()
+		requestSlot = true
 	default:
+		cause = "request_capacity"
 		block(503, "capacity limit reached")
 		return
 	}
@@ -105,6 +114,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	internal := prefixesContain(s.internal, ip)
 	if a.country == nil && needsCountry(&s.access, &route.access, ip, internal) {
+		cause = "geoip"
 		block(503, "GeoIP database unavailable")
 		return
 	}
@@ -112,6 +122,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var lookupErr error
 		ev.Country, lookupErr = a.country(ip)
 		if lookupErr != nil && needsCountry(&s.access, &route.access, ip, internal) {
+			cause = "geoip"
 			block(503, "GeoIP lookup failed")
 			return
 		}
@@ -172,21 +183,21 @@ methodAllowed:
 			}
 		}
 	}
-	// Reserve conservatively for Go's growing read buffer, Coraza's copy, and response buffering.
-	// This bounds payload allocations even when an admin raises the per-request body limit.
-	reservation := route.maxBodyBytes*4 + (4 << 20)
-	if !a.bodyMemory.TryAcquire(reservation) {
-		block(503, "inspection memory is exhausted")
-		return
-	}
-	defer a.bodyMemory.Release(reservation)
+	reservation := &inspectionReservation{app: a}
+	defer reservation.release()
 	if enc := r.Header.Get("Content-Encoding"); enc != "" && !strings.EqualFold(enc, "identity") {
 		block(415, "compressed request bodies are not supported")
 		return
 	}
 	tx := route.waf.NewTransaction()
-	defer tx.Close()
-	defer func() {
+
+	finishedInspection := false
+	finishInspection := func() {
+		if finishedInspection {
+			return
+		}
+		finishedInspection = true
+		defer func() { tx.Close(); tx = nil }()
 		tx.ProcessLogging()
 		seen := map[int]bool{}
 		for _, m := range tx.MatchedRules() {
@@ -202,7 +213,8 @@ methodAllowed:
 			ev.Action = "detected"
 			ev.Reason = "OWASP CRS match"
 		}
-	}()
+	}
+	defer finishInspection()
 	_, port, _ := net.SplitHostPort(r.RemoteAddr)
 	p, _ := strconv.Atoi(port)
 	tx.ProcessConnection(ev.Client, p, "", 0)
@@ -231,8 +243,18 @@ methodAllowed:
 	if interrupted(tx.ProcessRequestHeaders()) {
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, route.maxBodyBytes+1))
+	body, err := reservation.readBody(r.Body, route.maxBodyBytes)
 	if err != nil {
+		if errors.Is(err, errInspectionCapacity) {
+			cause = "inspection_capacity"
+			block(503, err.Error())
+			return
+		}
+		if errors.Is(err, errBodyTooLarge) {
+			block(413, err.Error())
+			return
+		}
+		cause = "request_body"
 		block(400, "request body could not be read")
 		return
 	}
@@ -287,7 +309,7 @@ methodAllowed:
 	if interrupted(it) {
 		return
 	}
-	r.Body = io.NopCloser(bytes.NewReader(body))
+	r.Body = &inspectionBody{reader: bytes.NewReader(body)}
 	r.ContentLength = int64(len(body))
 	r.TransferEncoding = nil
 	target := route.selectTarget(time.Now())
@@ -296,6 +318,12 @@ methodAllowed:
 		defer cancel()
 		r = r.WithContext(ctx)
 	}
+	upgraded := false
+	defer func() {
+		if upgraded {
+			<-a.upgradeSlots
+		}
+	}()
 	proxy := &httputil.ReverseProxy{
 		Transport: a.transport, FlushInterval: -1,
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -324,6 +352,7 @@ methodAllowed:
 			}
 		},
 		ModifyResponse: func(resp *http.Response) error {
+			cause = "response_inspection"
 			for k, vs := range resp.Header {
 				for _, v := range vs {
 					tx.AddResponseHeader(k, v)
@@ -344,13 +373,17 @@ methodAllowed:
 				if enc := resp.Header.Get("Content-Encoding"); enc != "" && enc != "identity" {
 					return errors.New("encoded upstream response cannot be inspected")
 				}
-				data, e := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+				data, e := reservation.readBody(resp.Body, 1<<20)
 				resp.Body.Close()
-				if e != nil {
+				if errors.Is(e, errInspectionCapacity) {
+					cause = "inspection_capacity"
 					return e
 				}
-				if len(data) > 1<<20 {
+				if errors.Is(e, errBodyTooLarge) {
 					return errors.New("response inspection limit exceeded")
+				}
+				if e != nil {
+					return e
 				}
 				it, _, e := tx.WriteResponseBody(data)
 				if e != nil {
@@ -384,9 +417,27 @@ methodAllowed:
 					resp.Header.Set("Strict-Transport-Security", "max-age=31536000")
 				}
 			}
+			cause = ""
+			if resp.StatusCode == http.StatusSwitchingProtocols {
+				select {
+				case a.upgradeSlots <- struct{}{}:
+					upgraded = true
+				default:
+					cause = "upgrade_capacity"
+					return errUpgradeCapacity
+				}
+				finishInspection()
+				body = nil
+				customValues = nil
+				r.Body.Close()
+				reservation.release()
+				<-a.slots
+				requestSlot = false
+			}
 			ev.Status = resp.StatusCode
 			now := time.Now()
 			if upstreamFailureStatus(resp.StatusCode) {
+				cause = "upstream_status"
 				target.markFailure(resp.StatusCode, http.StatusText(resp.StatusCode), now)
 			} else {
 				target.markSuccess(resp.StatusCode, now)
@@ -395,12 +446,20 @@ methodAllowed:
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, e error) {
 			ev.Status = 502
-			if errors.Is(e, errResponseBlocked) {
+			if errors.Is(e, errInspectionCapacity) || errors.Is(e, errUpgradeCapacity) {
+				ev.Status = 503
+				ev.Action = "blocked"
+				ev.Reason = e.Error()
+			} else if errors.Is(e, errResponseBlocked) {
+				cause = ""
 				ev.Status = 403
 			} else {
 				ev.Action = "error"
 				ev.Reason = "upstream unreachable or response cannot be inspected"
-				target.markFailure(0, e.Error(), time.Now())
+				if cause == "" {
+					cause = "upstream_transport"
+					target.markFailure(0, e.Error(), time.Now())
+				}
 			}
 			deny(w, ev.Status, ev.ID)
 		},
