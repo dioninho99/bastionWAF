@@ -436,13 +436,14 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 		stats["upstreamHealthIntervalSeconds"] = int64(a.healthInterval / time.Second)
 		stats["upstreamAlerts"] = a.alertWebhook != ""
 		stats["geoip"] = a.country != nil
+		stats["capacity"] = map[string]any{"requests": len(a.slots), "requestLimit": cap(a.slots), "upgrades": len(a.upgradeSlots), "upgradeLimit": cap(a.upgradeSlots), "reservedBytes": a.inspectionBytes.Load(), "budgetBytes": inspectionBudget}
 		jsonReply(w, 200, stats)
 	}))
 	mux.HandleFunc("GET /api/analytics", protected(func(w http.ResponseWriter, r *http.Request) {
 		stats := a.Events.stats()
 		jsonReply(w, 200, map[string]any{
 			"generatedAt": time.Now().UTC(),
-			"retention":   "last 1,000 events in memory; audit files rotate at 10 MiB",
+			"retention":   "last 1,000 events, restored from audit files on restart; two audit files of up to 10 MiB each",
 			"routes":      stats["routeCounts"],
 			"statuses":    stats["statusCounts"],
 			"clients":     stats["clientCounts"],
