@@ -521,7 +521,7 @@ func (a *App) AdminHandler(assets http.Handler, allowedOrigin string, secureCook
 			return
 		}
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-		io.WriteString(w, a.Events.metrics())
+		io.WriteString(w, a.metrics())
 	})
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) { apiError(w, 404, "API endpoint not found") })
 	mux.Handle("/", assets)

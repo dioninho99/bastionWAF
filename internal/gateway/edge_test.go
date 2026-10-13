@@ -86,6 +86,9 @@ func TestWebSocketUpgrade(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("upgrade: %d %s", resp.StatusCode, b)
 	}
+	if a.inspectionBytes.Load() != 0 || len(a.slots) != 0 || len(a.upgradeSlots) != 1 {
+		t.Fatal("upgrade did not release HTTP/inspection resources")
+	}
 	conn.Write([]byte{0x81, 0x82, 0, 0, 0, 0, 'h', 'i'})
 	frame := make([]byte, 4)
 	if _, err := io.ReadFull(reader, frame); err != nil {
