@@ -24,6 +24,33 @@ for file ownership (or run as root inside the LXC).
 See [Start in the LXC](#start-in-the-lxc) for details and
 [Admin access](#admin-access) for the SSH tunnel and first login.
 
+## Interface preview
+
+Example views of the administration UI, captured from the browser test fixture
+with synthetic traffic and example hostnames. These are illustrative screenshots,
+not production traffic or performance benchmarks. Dark and light themes are included.
+
+**Dashboard** — traffic history, response distribution, busiest hosts, and live capacity.
+
+![Bastion dashboard in dark mode with traffic charts, response distribution, and capacity gauges](docs/screenshots/dashboard.png)
+
+<details>
+<summary>Proxy hosts, settings, and mobile views</summary>
+
+**Proxy hosts** — backend health, inherited protection settings, and request limits.
+
+![Proxy host card showing two backend targets and a degraded health state](docs/screenshots/proxy-hosts.png)
+
+**Settings** — configuration backups, instance details, and administrator sessions.
+
+![Gateway settings in light mode with backup controls and session management](docs/screenshots/settings.png)
+
+**Mobile** — the same host details and controls on a narrow screen.
+
+<img src="docs/screenshots/mobile.png" alt="Responsive proxy host view on a mobile screen" width="360">
+
+</details>
+
 ## Status
 
 This is the first functional release, not a promise of complete enterprise-WAF parity. It uses real Coraza transactions with OWASP CRS rather than handwritten regex lists. Integration tests cover blocking before backend access, body forwarding, response inspection, TLS verification, WebSockets, access control, authentication, and configuration changes. Tune the rules for your applications and perform load and security testing in the target environment before production use.

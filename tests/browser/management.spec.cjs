@@ -10,6 +10,7 @@ async function login(page, username='', password='browser-test-admin-password') 
 test('create local user, sign in with 12 characters, change role and password', async ({page,browser}) => {
  await login(page);
  await page.getByRole('link',{name:'Users',exact:true}).click();
+ await page.locator('.create-user-details > summary').click();
  await page.locator('#local-user-form').getByLabel('Username',{exact:true}).fill('browser-user');
  await page.locator('#local-user-form').getByLabel('Password',{exact:true}).fill('LocalPass123!');
  await page.getByRole('button',{name:'Create user',exact:true}).click();
@@ -19,6 +20,7 @@ test('create local user, sign in with 12 characters, change role and password', 
  await login(local,'browser-user','LocalPass123!');
  await row.getByRole('combobox').selectOption('admin');
  await expect(page.locator('#toast')).toHaveText('Access level saved.');
+ await expect(page.locator('#user-summary .summary-tiles > div').filter({hasText:'Administrators'}).locator('strong')).toHaveText('1');
  await row.getByRole('button',{name:'Change password'}).click();
  await expect(page.getByLabel('New password')).toHaveAttribute('type','password');
  await page.getByLabel('New password').fill('ChangedPass1!');
@@ -85,7 +87,7 @@ test('IP exceptions and trusted proxies survive save and reload',async ({page})=
  await dialog.getByLabel('IP exceptions to country rules',{exact:true}).fill('2001:db8::1');
  await dialog.getByRole('button',{name:'Save',exact:true}).click();
  await expect(dialog).not.toBeVisible();
- await page.getByRole('row').filter({hasText:'Access test'}).getByRole('button',{name:'Edit',exact:true}).click();
+ await page.getByRole('article',{name:'Access test',exact:true}).getByRole('button',{name:'Edit',exact:true}).click();
  await expect(dialog.getByLabel('IP exceptions to country rules',{exact:true})).toHaveValue('2001:db8::1/128');
  await page.setViewportSize({width:390,height:844});
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBeTruthy();
@@ -100,6 +102,9 @@ test('certificate dashboard reports validity and renewal without resetting setup
 
  await expect(page.getByRole('heading',{name:'Certificate available'})).toBeVisible();
  await expect(page.locator('.certificate-card')).toContainText('60 days');
+ await page.getByText('Certificate fingerprint',{exact:true}).click();
+ await page.getByRole('button',{name:'Refresh status'}).click();
+ await expect(page.locator('[data-certificate-detail]')).toHaveAttribute('open','');
  await page.getByLabel('TLS mode',{exact:true}).selectOption('http01');
  await page.getByLabel('ACME email').fill('unsaved@example.test');
  page.on('dialog',dialog=>dialog.accept());
