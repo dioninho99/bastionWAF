@@ -11,6 +11,11 @@ test('event pagination, pause, search, filtered export and responsive layout',as
  await expect(page.locator('#shell')).toBeVisible();
  await page.getByRole('link',{name:'Events',exact:true}).first().click();
  await expect(page.locator('.event-row')).toHaveCount(50);
+ await page.locator('[data-event-action=blocked]').click();
+ await expect(page.locator('#event-filter')).toHaveValue('blocked');
+ await expect(page.locator('#event-count')).toHaveText('63 matching · 125 available');
+ await page.locator('[data-event-action=blocked]').click();
+ await expect(page.locator('#event-filter')).toHaveValue('');
  await page.getByRole('button',{name:'Next →'}).click();
  await expect(page.locator('#event-page')).toHaveText('Page 2 of 3');
  await expect(page.locator('#event-pause')).toHaveAttribute('aria-pressed','true');
