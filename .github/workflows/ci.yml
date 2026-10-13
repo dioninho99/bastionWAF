@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: bash -n setup.sh && python3 scripts/test_setup.py
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

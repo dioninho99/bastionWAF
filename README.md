@@ -7,6 +7,23 @@ Internet / clients → LXC :80 / :443 → Bastion → HTTP(S) applications on th
 Administrator → SSH tunnel / management network → LXC :9090 → Bastion Admin
 ```
 
+## Quick start
+
+With Docker Engine, Docker Compose v2, Bash and OpenSSL installed in your Linux
+LXC, run these commands in the cloned repository:
+
+```sh
+bash setup.sh                  # Guided installation and startup
+# Later, if you forget the administrator password:
+bash setup.sh --reset-password
+```
+
+The wizard lets you choose or generate a password and prepares the required files
+and permissions. Use a terminal account that can access Docker and use `sudo`
+for file ownership (or run as root inside the LXC).
+See [Start in the LXC](#start-in-the-lxc) for details and
+[Admin access](#admin-access) for the SSH tunnel and first login.
+
 ## Status
 
 This is the first functional release, not a promise of complete enterprise-WAF parity. It uses real Coraza transactions with OWASP CRS rather than handwritten regex lists. Integration tests cover blocking before backend access, body forwarding, response inspection, TLS verification, WebSockets, access control, authentication, and configuration changes. Tune the rules for your applications and perform load and security testing in the target environment before production use.
@@ -44,21 +61,66 @@ Prerequisite: a Linux LXC with a working Docker Engine and Compose v2. The LXC n
 
 As a starting point, use 2 vCPUs and 2 GiB RAM for the LXC, with extra build capacity. Compose limits the service to 1 GiB RAM and 2 CPUs; measure actual capacity with your own traffic.
 
-In the cloned project:
+In the cloned project, run the guided setup:
 
 ```sh
-mkdir -p secrets certs
-chmod 700 secrets certs
+bash setup.sh
+```
+
+The wizard checks Docker, creates the required directories and `.env`, asks whether
+private-network backends are needed, and builds/starts the gateway. Choose your
+own admin passphrase (at least 20 characters) or press Enter to generate one.
+Generated passwords are displayed once in the terminal; save yours in a password
+manager. File permissions and container ownership are handled automatically
+(`sudo` may be required for ownership). No manual `openssl`, `chown`, or `.env`
+editing is needed for the default SSH-tunnel setup. Docker Compose v2 with
+`up --wait` support is required.
+
+Running the wizard again preserves your `.env`, password, routes, users and
+certificates. It rebuilds/recreates the container and waits for a healthy admin
+listener. This briefly interrupts traffic and signs out existing sessions.
+
+Forgotten admin password? Run on the LXC:
+
+```sh
+bash setup.sh --reset-password
+```
+
+Choose a replacement; the wizard recreates the container to activate it. Managed
+user passwords are unchanged. For day-to-day use, you can also create a named
+administrator under **Users** and manage its password there.
+
+The bootstrap admin password lives in `secrets/admin_password.txt`, readable by
+container UID 10001. It is not written into the image or `config.json`; there is
+no default password. To sign in with it, leave **Username** empty.
+
+If setup reports that Docker is unavailable, start Docker and ensure your terminal
+account can access it, then rerun the wizard. If startup fails or the health check
+times out, inspect `docker compose logs --tail=100 bastion`. Fix the reported
+configuration error and rerun `bash setup.sh`; your saved settings are retained.
+For an existing installation, edit `.env` directly to change network settings—the
+wizard only asks about private backends when creating a new `.env`.
+
+<details>
+<summary>Manual installation / automation</summary>
+
+```sh
+mkdir -p secrets certs geoip
+chmod 700 secrets
 umask 077
 openssl rand -hex 32 > secrets/admin_password.txt
+# Save the generated password in your password manager before changing ownership.
+cat secrets/admin_password.txt
 sudo chown 10001:10001 secrets/admin_password.txt
 sudo chmod 400 secrets/admin_password.txt
 cp .env.example .env
-docker compose up -d --build
-docker compose ps
+docker compose up -d --build --wait
 ```
 
-The secret is the GUI password. It is not written into the image or `config.json`. At least 20 characters are required; no default password exists. The secret file must be readable by UID 10001 inside the container.
+Set `BASTION_ALLOW_PRIVATE_UPSTREAMS=true` in `.env` if your backends are on your
+private network. The admin origin defaults to empty for direct/tunnel access.
+
+</details>
 
 The data volume is initialized with UID 10001 on first start and persists across container restarts.
 
