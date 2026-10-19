@@ -1,4 +1,4 @@
-const {test,expect}=require('@playwright/test');
+const {test,expect}=require('./fixtures.cjs');
 const {readFileSync}=require('node:fs');
 const records=Array.from({length:125},(_,i)=>({id:`request-${i}`,time:new Date(Date.now()-i*1000).toISOString(),host:'app.example.com',path:`/requests/${i}`,method:'GET',client:'192.0.2.1',country:'AT',action:i%2?'allowed':'blocked',status:i%2?200:403,reason:i%2?'':'OWASP CRS',ruleIds:i%2?[]:[942100],duration:1.2}));
 test('event pagination, pause, search, filtered export and responsive layout',async({page},testInfo)=>{
@@ -6,8 +6,6 @@ test('event pagination, pause, search, filtered export and responsive layout',as
  let events=records;
  await page.route('**/api/events',route=>route.fulfill({json:events}));
  await page.goto('/');
- await page.getByLabel('Password',{exact:true}).fill('browser-test-admin-password');
- await page.getByRole('button',{name:'Sign in to Bastion'}).click();
  await expect(page.locator('#shell')).toBeVisible();
  await page.getByRole('link',{name:'Events',exact:true}).first().click();
  await expect(page.locator('.event-row')).toHaveCount(50);

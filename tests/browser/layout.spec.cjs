@@ -1,4 +1,4 @@
-const {test,expect}=require('@playwright/test');
+const {test,expect}=require('./fixtures.cjs');
 test('spacious layouts show route details and remain usable in both themes',async({page},testInfo)=>{
  page.on('pageerror',error=>{throw error});
  await page.addInitScript(()=>{window.cspViolations=[];document.addEventListener('securitypolicyviolation',event=>window.cspViolations.push(event.violatedDirective));});
@@ -18,8 +18,6 @@ test('spacious layouts show route details and remain usable in both themes',asyn
  });
  await page.setViewportSize({width:1440,height:1050});
  await page.goto('/');
- await page.getByLabel('Password',{exact:true}).fill('browser-test-admin-password');
- await page.getByRole('button',{name:'Sign in to Bastion'}).click();
  await expect(page.getByRole('heading',{name:'Protection details'})).toBeVisible();
  await expect(page.getByLabel('Inspection buffers')).toBeVisible();
  await expect(page.getByRole('heading',{name:'Response mix'})).toBeVisible();

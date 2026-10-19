@@ -1,7 +1,8 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./fixtures.cjs');
 test.beforeEach(async ({page})=>{page.on('pageerror',error=>{throw error;});});
 async function login(page, username='', password='browser-test-admin-password') {
  await page.goto('/');
+ if(!username){await expect(page.locator('#shell')).toBeVisible();return;}
  await page.getByLabel('Username', {exact:false}).fill(username);
  await page.getByLabel('Password', {exact:true}).fill(password);
  await page.getByRole('button',{name:'Sign in to Bastion'}).click();

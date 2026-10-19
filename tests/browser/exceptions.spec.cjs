@@ -1,10 +1,8 @@
-const {test,expect}=require('@playwright/test');
+const {test,expect}=require('./fixtures.cjs');
 
 test.beforeEach(async({page})=>{
  page.on('pageerror',error=>{throw error;});
  await page.goto('/');
- await page.getByLabel('Password',{exact:true}).fill('browser-test-admin-password');
- await page.getByRole('button',{name:'Sign in to Bastion'}).click();
  await expect(page.locator('#shell')).toBeVisible();
  const result=await page.evaluate(async()=>{
   const s=await (await fetch('/api/session')).json(),c=await (await fetch('/api/config')).json();
