@@ -13,19 +13,21 @@ import (
 )
 
 type Event struct {
-	ID       string    `json:"id"`
-	Time     time.Time `json:"time"`
-	Client   string    `json:"client"`
-	Country  string    `json:"country,omitempty"`
-	Host     string    `json:"host"`
-	Method   string    `json:"method"`
-	Path     string    `json:"path"`
-	Route    string    `json:"route"`
-	Status   int       `json:"status"`
-	Action   string    `json:"action"`
-	Reason   string    `json:"reason"`
-	RuleIDs  []int     `json:"ruleIds"`
-	Duration float64   `json:"duration"`
+	RouteID      string    `json:"routeId,omitempty"`
+	ExceptionIDs []string  `json:"exceptionIds,omitempty"`
+	ID           string    `json:"id"`
+	Time         time.Time `json:"time"`
+	Client       string    `json:"client"`
+	Country      string    `json:"country,omitempty"`
+	Host         string    `json:"host"`
+	Method       string    `json:"method"`
+	Path         string    `json:"path"`
+	Route        string    `json:"route"`
+	Status       int       `json:"status"`
+	Action       string    `json:"action"`
+	Reason       string    `json:"reason"`
+	RuleIDs      []int     `json:"ruleIds"`
+	Duration     float64   `json:"duration"`
 }
 type Bucket struct {
 	Minute   int64  `json:"minute"`

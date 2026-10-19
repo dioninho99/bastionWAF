@@ -14,22 +14,23 @@ import (
 )
 
 type Config struct {
-	TrustedProxyCIDRs  []string `json:"trustedProxyCIDRs,omitempty"`
-	GeoBypassCIDRs     []string `json:"geoBypassCIDRs,omitempty"`
-	Revision           int64    `json:"revision"`
-	Mode               string   `json:"mode"`
-	Paranoia           int      `json:"paranoia"`
-	Threshold          int      `json:"threshold"`
-	MaxBodyBytes       int64    `json:"maxBodyBytes"`
-	RateLimit          int      `json:"rateLimit"`
-	ResponseInspection bool     `json:"responseInspection"`
-	DenyCIDRs          []string `json:"denyCIDRs"`
-	AllowCIDRs         []string `json:"allowCIDRs"`
-	InternalCIDRs      []string `json:"internalCIDRs"`
-	GeoDenyCountries   []string `json:"geoDenyCountries"`
-	GeoAllowCountries  []string `json:"geoAllowCountries"`
-	Routes             []Route  `json:"routes"`
-	Rules              []Rule   `json:"rules"`
+	Exceptions         []WAFException `json:"exceptions,omitempty"`
+	TrustedProxyCIDRs  []string       `json:"trustedProxyCIDRs,omitempty"`
+	GeoBypassCIDRs     []string       `json:"geoBypassCIDRs,omitempty"`
+	Revision           int64          `json:"revision"`
+	Mode               string         `json:"mode"`
+	Paranoia           int            `json:"paranoia"`
+	Threshold          int            `json:"threshold"`
+	MaxBodyBytes       int64          `json:"maxBodyBytes"`
+	RateLimit          int            `json:"rateLimit"`
+	ResponseInspection bool           `json:"responseInspection"`
+	DenyCIDRs          []string       `json:"denyCIDRs"`
+	AllowCIDRs         []string       `json:"allowCIDRs"`
+	InternalCIDRs      []string       `json:"internalCIDRs"`
+	GeoDenyCountries   []string       `json:"geoDenyCountries"`
+	GeoAllowCountries  []string       `json:"geoAllowCountries"`
+	Routes             []Route        `json:"routes"`
+	Rules              []Rule         `json:"rules"`
 }
 type Route struct {
 	GeoBypassCIDRs      []string `json:"geoBypassCIDRs,omitempty"`
@@ -73,6 +74,30 @@ func DefaultConfig() Config {
 }
 
 func normalize(c *Config) {
+	if c.Exceptions == nil {
+		c.Exceptions = []WAFException{}
+	}
+	for i := range c.Exceptions {
+		for j, raw := range c.Exceptions[i].SourceURLs {
+			raw = strings.TrimSpace(raw)
+			if u, err := url.Parse(raw); err == nil {
+				u.Scheme = strings.ToLower(u.Scheme)
+				u.Host = strings.ToLower(u.Host)
+				if c.Exceptions[i].SourceHeader == "Origin" && u.Path == "/" {
+					u.Path = ""
+				}
+				raw = u.String()
+			}
+			c.Exceptions[i].SourceURLs[j] = raw
+		}
+		if c.Exceptions[i].RouteIDs == nil {
+			c.Exceptions[i].RouteIDs = []string{}
+		}
+		if c.Exceptions[i].Methods == nil {
+			c.Exceptions[i].Methods = []string{}
+		}
+		c.Exceptions[i].ClientCIDRs = normalizeIPList(c.Exceptions[i].ClientCIDRs)
+	}
 	c.DenyCIDRs = normalizeIPList(c.DenyCIDRs)
 	c.AllowCIDRs = normalizeIPList(c.AllowCIDRs)
 	c.InternalCIDRs = normalizeIPList(c.InternalCIDRs)
@@ -124,6 +149,9 @@ var httpMethod = regexp.MustCompile(`^[A-Z][A-Z0-9-]{0,19}$`)
 var owaspCategory = regexp.MustCompile(`^A(0[1-9]|10)$`)
 
 func validate(c Config, allowPrivate bool) error {
+	if err := validateExceptions(c); err != nil {
+		return err
+	}
 	if err := validateCIDRs(c.GeoBypassCIDRs, "global country exceptions"); err != nil {
 		return err
 	}
