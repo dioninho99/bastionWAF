@@ -107,6 +107,7 @@ func (a *App) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ev.Route = route.config.Name
+	ev.RouteID = route.config.ID
 	ip, err := netip.ParseAddr(ev.Client)
 	if err != nil {
 		block(400, "invalid client IP")
@@ -190,6 +191,11 @@ methodAllowed:
 		return
 	}
 	tx := route.waf.NewTransaction()
+	for _, exception := range c.Exceptions {
+		if exception.appliesTo(route.config.ID) && exception.matches(r.URL.Path, r.Method, ip, r.Header) {
+			ev.ExceptionIDs = append(ev.ExceptionIDs, exception.ID)
+		}
+	}
 
 	finishedInspection := false
 	finishInspection := func() {

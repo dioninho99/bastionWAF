@@ -254,7 +254,8 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 		for _, id := range r.ExcludedRuleIDs {
 			exclusions += fmt.Sprintf("SecRuleRemoveById %d\n", id)
 		}
-		cacheKey += "|" + exclusions
+		exceptionRules := exceptionDirectives(c.Exceptions, r.ID)
+		cacheKey += "|" + exclusions + "|" + exceptionRules
 		waf, ok := engines[cacheKey]
 		if !ok {
 			engine := "On"
@@ -267,7 +268,7 @@ func compile(c Config, allowPrivate bool) (*snapshot, error) {
 			}
 			setup := fmt.Sprintf("SecRuleEngine %s\nSecRequestBodyAccess On\nSecRequestBodyLimit %d\nSecRequestBodyNoFilesLimit %d\nSecRequestBodyInMemoryLimit %d\nSecRequestBodyLimitAction Reject\nSecResponseBodyAccess %s\nSecResponseBodyLimit 1048576\nSecResponseBodyLimitAction Reject\nSecAuditEngine Off\nSecAction \"id:900000,phase:1,pass,nolog,setvar:tx.blocking_paranoia_level=%d,setvar:tx.detection_paranoia_level=%d,setvar:tx.inbound_anomaly_score_threshold=%d,setvar:tx.outbound_anomaly_score_threshold=4\"\n", engine, maxBodyBytes, maxBodyBytes, maxBodyBytes, response, paranoia, paranoia, threshold)
 			var err error
-			waf, err = coraza.NewWAF(coraza.NewWAFConfig().WithRootFS(crs.FS).WithDirectivesFromFile("@coraza.conf-recommended").WithDirectivesFromFile("@crs-setup.conf.example").WithDirectives(setup).WithDirectivesFromFile("@owasp_crs/*.conf").WithDirectives(exclusions))
+			waf, err = coraza.NewWAF(coraza.NewWAFConfig().WithRootFS(crs.FS).WithDirectivesFromFile("@coraza.conf-recommended").WithDirectivesFromFile("@crs-setup.conf.example").WithDirectives(setup).WithDirectives(exceptionRules).WithDirectivesFromFile("@owasp_crs/*.conf").WithDirectives(exclusions))
 			if err != nil {
 				return nil, fmt.Errorf("WAF configuration: %w", err)
 			}

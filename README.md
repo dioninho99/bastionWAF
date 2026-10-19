@@ -64,7 +64,7 @@ This is the first functional release, not a promise of complete enterprise-WAF p
 - TLS 1.2+, manual PEM certificates, or automatic Let's Encrypt certificates for enabled hosts.
 - Coraza **3.8.1** and CRS package **4.25.0**, pinned in `go.mod`/`go.sum`.
 - SQLi, XSS, traversal, command injection, and other CRS categories, including query, header, JSON, form, and multipart inspection.
-- Blocking/Detection Only, paranoia levels 1–4, anomaly threshold, and targeted CRS exclusions per route.
+- Blocking/Detection Only, paranoia levels 1–4, anomaly threshold, and a central Exceptions page for targeted CRS exclusions across all hosts or selected hosts and clients.
 - Custom path, query-string, header, body, User-Agent, and method rules using bounded literal case-insensitive substrings; rules can block or log before forwarding. OWASP CRS remains the primary SQL injection, XSS, traversal, and command-injection detector.
 - Custom rules can be tagged with an OWASP Top 10:2025 category (A01–A10). The WAF protection page shows a configuration coverage view for access control, misconfiguration, supply-chain, cryptography, injection, design, authentication, integrity, logging, and exceptional-condition controls. This is an operational mapping, not a certification.
 - IPv4/IPv6 CIDR deny list (blacklist) and optional allow list (whitelist), globally and per route. Deny rules take precedence; a route list can only narrow the global policy, and allowed clients still pass through the WAF.
@@ -305,6 +305,54 @@ and 18091 with temporary data and test credentials. It never uses existing
 `BASTION_*` environment settings. Failed tests retain a Playwright trace and HTML
 report; CI uploads these as artifacts for seven days. Traces contain test-only
 credentials and must not be collected against production.
+
+### WAF exceptions
+
+Use **Exceptions** in the navigation to create, search, edit, enable/disable,
+and delete WAF exceptions. Choose **All hosts** (including future hosts) or
+**Selected hosts**, then optionally restrict the exception to client IPv4/IPv6
+addresses or CIDRs. A device is identified by its client IP, not its hostname or
+MAC address; devices behind the same NAT share that address. Trusted proxy
+settings apply to client matching.
+
+Each exception has a name, reason, exact path or path prefix, optional HTTP
+methods, and 1–32 CRS detection rule IDs to skip. All conditions must match.
+Paths are URL-decoded and case-sensitive; queries are ignored. A prefix of
+`/api` includes `/api` and `/api/...`, but not `/api-other`. A prefix of `/`
+covers every path. Exceptions combine additively; disabling one does not undo
+an overlapping exception. Anomaly evaluation and setup rules cannot be excluded
+through this feature. Other CRS rules, custom rules, IP/country access controls,
+authentication and body/rate limits remain active.
+
+**URL source header** adds an optional Origin or Referer condition. Enter one
+HTTP(S) source URL per line (up to 16). Origin matches the scheme and host/port
+exactly, for example `https://portal.example.com`. Referer supports an exact page
+URL or a path prefix, for example `https://portal.example.com/editor`. Prefixes
+match the page and child paths, including queries, but not `/editor-other` or a
+similarly named domain. Exact Referer matching also rejects a query suffix.
+Use URLs without credentials, query strings, fragments, percent escapes or
+wildcards; ports must match explicitly. Host matching is case-insensitive and
+path matching is case-sensitive. A missing, duplicate or nonmatching selected
+header prevents the exception; there is no Origin/Referer fallback. Existing
+exceptions without this condition retain their behavior. Browsers may omit
+these headers or send only a website origin as Referer, and non-browser clients
+can forge them: this is an additional filter, not authentication. Source header
+values are not added to request logs.
+
+From **Events → Request details → Create exception from request**, review a
+prefilled, disabled draft scoped to the recorded host, path and method. Detection
+rule IDs are copied; aggregate blocking rules such as `949110` are omitted.
+Review the reason and scope before enabling it. Applied exception IDs are saved
+in request events and displayed in request details, even if another rule still
+blocks the request. The IDs indicate matching exceptions, not proof that a rule
+would otherwise have blocked that request.
+
+Existing whole-route `excludedRuleIds` remain compatible and are managed under
+**Exceptions → Existing host exclusions**. They no longer appear in the host
+editor. A host referenced by a new exception cannot be deleted until it is
+removed from that exception's scope (or the exception is deleted). Config
+backups include the central `exceptions` array. Saves activate immediately,
+without a restart. Up to 100 exceptions are supported.
 
 ### IP exceptions and trusted proxies
 

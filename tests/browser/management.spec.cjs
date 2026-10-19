@@ -1,7 +1,8 @@
-const { test, expect } = require('@playwright/test');
+const { test, expect } = require('./fixtures.cjs');
 test.beforeEach(async ({page})=>{page.on('pageerror',error=>{throw error;});});
 async function login(page, username='', password='browser-test-admin-password') {
  await page.goto('/');
+ if(!username){await expect(page.locator('#shell')).toBeVisible();return;}
  await page.getByLabel('Username', {exact:false}).fill(username);
  await page.getByLabel('Password', {exact:true}).fill(password);
  await page.getByRole('button',{name:'Sign in to Bastion'}).click();
@@ -16,7 +17,8 @@ test('create local user, sign in with 12 characters, change role and password', 
  await page.getByRole('button',{name:'Create user',exact:true}).click();
  const row=page.getByRole('row').filter({hasText:'local:browser-user'});
  await expect(row).toBeVisible();
- const context=await browser.newContext({baseURL:'http://127.0.0.1:19091'});const local=await context.newPage();
+ // This test exercises a different account, so it must not inherit the admin session.
+ const context=await browser.newContext({baseURL:'http://127.0.0.1:19091',storageState:{cookies:[],origins:[]}});const local=await context.newPage();
  await login(local,'browser-user','LocalPass123!');
  await row.getByRole('combobox').selectOption('admin');
  await expect(page.locator('#toast')).toHaveText('Access level saved.');
